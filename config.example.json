@@ -6,6 +6,8 @@
   "anonymous": false,
   "proxies": ["direct"],
   "proxyfile": "",
+  "proxy_mode": "roundrobin",
+  "proxy_disabled": [],
   "upstream": {
     "zen": "https://opencode.ai/zen",
     "go": "https://opencode.ai/zen/go",

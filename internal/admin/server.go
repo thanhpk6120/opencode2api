@@ -214,6 +214,10 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	
 	// Proxy mode/disabled are managed on the Proxies page; the legacy config
 	// form omits them, so preserve current values unless explicitly sent.
+	if update.ProxyMode != "" && update.ProxyMode != config.ProxyModeSticky && update.ProxyMode != config.ProxyModeRoundRobin && update.ProxyMode != config.ProxyModeRandom {
+		writeAdminError(w, 400, "invalid_proxy_mode", "proxy_mode must be sticky, roundrobin, or random")
+		return
+	}
 	proxyMode := current.ProxyMode
 	if update.ProxyMode != "" {
 		proxyMode = update.ProxyMode

@@ -807,6 +807,7 @@ $("#refresh-now").onclick = async () => {
   await Promise.all([refreshMonitor(), loadConfig(), loadDebugModels()]);
   if (location.hash === "#model-quotas") await loadModelQuotas();
   if (location.hash === "#api-keys") await loadAPIKeys();
+  if (location.hash === "#proxies") await loadProxies();
   toast(t("t305"));
 };
 function derivedAPIBase() {
