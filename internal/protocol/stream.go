@@ -166,48 +166,10 @@ func (writer *sseFlushWriter) Write(data []byte) (int, error) {
 }
 
 func ForwardStream(ctx context.Context, w http.ResponseWriter, reader io.Reader, protocol Protocol, model string) (Usage, bool, error) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return Usage{}, false, fmt.Errorf("response writer does not support streaming")
-	}
-	observer := newStreamUsageObserver(protocol)
-	_, copyErr := io.Copy(&sseFlushWriter{writer: w, flusher: flusher}, io.TeeReader(reader, observer))
-	usage := observer.Finish()
-	if observer.ErrorTermination() {
-		if copyErr != nil {
-			return usage, observer.Reported(), copyErr
-		}
-		return usage, observer.Reported(), errStreamUpstreamFailure
-	}
-	if observer.NormalTermination() && observer.ParseError() == nil {
-		return usage, observer.Reported(), copyErr
-	}
-	if ClientCanceled(ctx, copyErr) {
-		if copyErr == nil {
-			copyErr = ctx.Err()
-		}
-		return usage, observer.Reported(), copyErr
-	}
-	cause := observer.ParseError()
-	if copyErr != nil {
-		cause = copyErr
-	}
-	if cause == nil {
-		cause = errSSEUnexpectedEOF
-	}
-	if observer.Started() {
-		// Downstream received raw SSE events already; close gracefully.
-		emitter := newBridgeStreamEmitter(w, flusher, protocol, model)
-		if finishErr := emitter.Finish(); finishErr != nil {
-			return usage, observer.Reported(), finishErr
-		}
-		return usage, observer.Reported(), cause
-	}
-	emitter := newBridgeStreamEmitter(w, flusher, protocol, model)
-	if err := emitUnexpectedStreamError(emitter, cause); err != nil {
-		return usage, observer.Reported(), err
-	}
-	return usage, observer.Reported(), cause
+	// Delegating to TranscodeStream with same from/to protocol ensures
+	// full emitter state tracking, clean error termination, and accurate
+	// truncated-completed terminal event emission without raw byte-stream hazards.
+	return TranscodeStream(ctx, w, reader, protocol, protocol, model)
 }
 
 type streamUsageObserver struct {
