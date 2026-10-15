@@ -1433,21 +1433,22 @@ function renderProxies(proxies) {
   host.replaceChildren();
   for (const proxy of proxies) {
     const row = document.createElement("tr");
-    appendCell(row, proxy.address, "mono");
+    appendCell(row, proxy.source === "proxyfile" ? proxy.address + " [" + proxy.source + "]" : proxy.address, "mono");
     appendCell(row, proxy.healthy ? t("t453") : t("t454"), proxy.healthy ? "status ok" : "status bad");
     appendCell(row, proxy.enabled ? t("t455") : t("t456"), proxy.enabled ? "status ok" : "status warn");
     appendCell(row, t("t231", proxy.zen_keys, proxy.go_keys, proxy.anonymous ? t("t422") : t("t423")));
     const cell = document.createElement("td"),
       actions = document.createElement("div");
     actions.className = "key-actions";
-    for (const [label, action] of [
-      [t("t457"), (button) => testProxy(proxy, button)],
-      [t("t458"), (button) => editProxy(proxy, button)],
-      [proxy.enabled ? t("t461") : t("t460"), (button) => mutateProxy(proxy.id, "PATCH", { enabled: !proxy.enabled }, button, "t468")],
-      [t("t459"), (button) => {
+    const proxyActs = [[t("t457"), (button) => testProxy(proxy, button)]];
+    if (proxy.source !== "proxyfile") {
+      proxyActs.push([t("t458"), (button) => editProxy(proxy, button)]);
+      proxyActs.push([proxy.enabled ? t("t461") : t("t460"), (button) => mutateProxy(proxy.id, "PATCH", { enabled: !proxy.enabled }, button, "t468")]);
+      proxyActs.push([t("t459"), (button) => {
         if (confirm(t("t465"))) mutateProxy(proxy.id, "DELETE", null, button, "t469");
-      }],
-    ]) {
+      }]);
+    }
+    for (const [label, action] of proxyActs) {
       const button = document.createElement("button");
       button.className = "ghost";
       button.textContent = label;

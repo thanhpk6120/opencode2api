@@ -24,7 +24,11 @@ func (g *Gateway) syncProxyResult(ctx context.Context, proxy *proxyTransport, st
 	if proxy == nil {
 		return false
 	}
-	if isProxyFailure(err) {
+	// In sticky mode, if either the proxy transport failed OR calling the
+	// upstream AI model returned a server/proxy error (HTTP 5xx, e.g. 502/503/504),
+	// mark the proxy unavailable and advance to the next healthy proxy immediately.
+	stickyFailure := g.transports != nil && g.transports.mode == config.ProxyModeSticky && (status >= 500 || isProxyFailure(err))
+	if isProxyFailure(err) || stickyFailure {
 		g.rebindFailedProxy(proxy)
 		g.verifyProxyAfterError(ctx, proxy, status)
 		return true
@@ -64,16 +68,13 @@ func (g *Gateway) rebindFailedProxy(proxy *proxyTransport) (zenMoved, goMoved in
 		return 0, 0
 	}
 	wasHealthy := proxy.healthy.Swap(false)
-	// In sticky mode the pinned proxy follows real proxy failures (timeouts
-	// and connection refusals via isProxyFailure). AI model errors (HTTP
-	// 4xx/5xx) never reach this path: they only cool the key.
-	if g.transports != nil && g.transports.mode == config.ProxyModeSticky {
-		g.transports.advanceSticky(proxy)
-	}
 	return g.rebindUnavailableProxy(proxy, wasHealthy)
 }
 
 func (g *Gateway) rebindUnavailableProxy(proxy *proxyTransport, wasHealthy bool) (zenMoved, goMoved int) {
+	if g.transports != nil && g.transports.mode == config.ProxyModeSticky {
+		g.transports.advanceSticky(proxy)
+	}
 	zenMoved = g.zenNodes.RebindProxy(proxy.index)
 	goMoved = g.goNodes.RebindProxy(proxy.index)
 	if wasHealthy || zenMoved+goMoved > 0 {

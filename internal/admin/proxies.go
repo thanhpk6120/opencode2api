@@ -35,9 +35,13 @@ func (a *Server) proxyViews() []ProxyView {
 	for _, id := range cfg.ProxyDisabled {
 		disabled[id] = struct{}{}
 	}
-	byAddr := make(map[string]gateway.ProxyStatus, len(resources.Proxies))
+	byID := make(map[string]gateway.ProxyStatus, len(resources.Proxies))
 	for _, st := range resources.Proxies {
-		byAddr[st.Address] = st
+		if st.ID != "" {
+			byID[st.ID] = st
+		} else {
+			byID[st.Address] = st
+		}
 	}
 	views := make([]ProxyView, 0, len(cfg.Proxies))
 	for _, raw := range cfg.Proxies {
@@ -49,7 +53,7 @@ func (a *Server) proxyViews() []ProxyView {
 		} else if _, ok := disabled[raw]; ok {
 			view.Enabled = false
 		}
-		if st, ok := byAddr[redacted]; ok {
+		if st, ok := byID[id]; ok {
 			view.Healthy = st.Healthy
 			view.Checking = st.Checking
 			view.ZenKeys = st.ZenKeys
@@ -57,6 +61,18 @@ func (a *Server) proxyViews() []ProxyView {
 			view.Anonymous = st.Anonymous
 		}
 		views = append(views, view)
+	}
+	// Proxyfile-merged entries are active in traffic but not managed here:
+	// surface them read-only so the operator sees the full effective set.
+	stored := make(map[string]struct{}, len(cfg.Proxies))
+	for _, raw := range cfg.Proxies {
+		stored[config.Fingerprint(raw)] = struct{}{}
+	}
+	for _, st := range resources.Proxies {
+		if _, ok := stored[st.ID]; ok {
+			continue
+		}
+		views = append(views, ProxyView{ID: st.ID, Address: st.Address, Healthy: st.Healthy, Checking: st.Checking, Enabled: true, Source: "proxyfile", ZenKeys: st.ZenKeys, GoKeys: st.GoKeys, Anonymous: st.Anonymous})
 	}
 	return views
 }

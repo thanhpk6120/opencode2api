@@ -306,6 +306,7 @@ type KeyStatus struct {
 }
 
 type ProxyStatus struct {
+	ID      string `json:"id"`
 	Index     int    `json:"index"`
 	Address   string `json:"address"`
 	Healthy   bool   `json:"healthy"`
@@ -333,7 +334,7 @@ func (m *RuntimeManager) Resources() ResourceSnapshot {
 	goBindings := append([]int(nil), gateway.goNodes.bindingCount...)
 	gateway.goNodes.bindingsMu.Unlock()
 	for _, proxy := range gateway.transports.items {
-		status := ProxyStatus{Index: proxy.index, Address: config.RedactURL(proxy.name), Healthy: proxy.healthy.Load(), Checking: proxy.checking.Load(), Anonymous: gateway.cfg.Anonymous}
+		status := ProxyStatus{ID: config.Fingerprint(proxy.name), Index: proxy.index, Address: config.RedactURL(proxy.name), Healthy: proxy.healthy.Load(), Checking: proxy.checking.Load(), Anonymous: gateway.cfg.Anonymous}
 		if proxy.index < len(zenBindings) {
 			status.ZenKeys = zenBindings[proxy.index]
 		}
