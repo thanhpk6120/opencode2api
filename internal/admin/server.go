@@ -62,7 +62,13 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/rotation", a.authenticate(a.csrf(http.HandlerFunc(a.handleSaveRotation))))
 	mux.Handle("POST /api/rotation/current", a.authenticate(a.csrf(http.HandlerFunc(a.handleSelectRotation))))
 	mux.Handle("GET /api/model-quotas", a.authenticate(http.HandlerFunc(a.handleModelQuotas)))
-	mux.Handle("GET /api/api-keys", a.authenticate(http.HandlerFunc(a.handleListAPIKeys)))
+	mux.Handle("GET /api/proxies", a.authenticate(http.HandlerFunc(a.handleListProxies)))
+mux.Handle("POST /api/proxies", a.authenticate(a.csrf(http.HandlerFunc(a.handleCreateProxies))))
+mux.Handle("PATCH /api/proxies/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleUpdateProxy))))
+mux.Handle("DELETE /api/proxies/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleDeleteProxy))))
+mux.Handle("PUT /api/proxies/mode", a.authenticate(a.csrf(http.HandlerFunc(a.handleSetProxyMode))))
+mux.Handle("POST /api/proxies/test", a.authenticate(a.csrf(http.HandlerFunc(a.handleTestProxy))))
+mux.Handle("GET /api/api-keys", a.authenticate(http.HandlerFunc(a.handleListAPIKeys)))
 	mux.Handle("POST /api/api-keys", a.authenticate(a.csrf(http.HandlerFunc(a.handleCreateAPIKey))))
 	mux.Handle("PATCH /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleUpdateAPIKey))))
 	mux.Handle("DELETE /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleDeleteAPIKey))))
@@ -115,6 +121,8 @@ type ConfigView struct {
 	Anonymous   bool                     `json:"anonymous"`
 	Proxies     []SecretView             `json:"proxies"`
 	ProxyFile   string                   `json:"proxyfile"`
+	ProxyMode   string                   `json:"proxy_mode"`
+	ProxyDisabled []string               `json:"proxy_disabled"`
 	Upstream    config.UpstreamConfig    `json:"upstream"`
 	Retry       config.RetryConfig       `json:"retry"`
 	Models      config.ModelsConfig      `json:"models"`
@@ -153,6 +161,8 @@ type ConfigUpdate struct {
 	Anonymous   bool                     `json:"anonymous"`
 	Proxies     []SecretInput            `json:"proxies"`
 	ProxyFile   string                   `json:"proxyfile"`
+	ProxyMode   string                   `json:"proxy_mode,omitempty"`
+	ProxyDisabled []string               `json:"proxy_disabled,omitempty"`
 	Upstream    config.UpstreamConfig    `json:"upstream"`
 	Retry       config.RetryConfig       `json:"retry"`
 	Models      config.ModelsConfig      `json:"models"`
@@ -201,10 +211,21 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	if update.Reasoning != nil {
 		reasoning = *update.Reasoning
 	}
-	candidate := config.Config{
+	
+	// Proxy mode/disabled are managed on the Proxies page; the legacy config
+	// form omits them, so preserve current values unless explicitly sent.
+	proxyMode := current.ProxyMode
+	if update.ProxyMode != "" {
+		proxyMode = update.ProxyMode
+	}
+	proxyDisabled := current.ProxyDisabled
+	if update.ProxyDisabled != nil {
+		proxyDisabled = update.ProxyDisabled
+	}
+candidate := config.Config{
 		ServerKeyMetadata: current.ServerKeyMetadata,
 		Rotation:          current.Rotation,
-		Listen:            update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Proxies: proxies, ProxyFile: update.ProxyFile,
+		Listen:            update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Proxies: proxies, ProxyFile: update.ProxyFile, ProxyMode: proxyMode, ProxyDisabled: proxyDisabled,
 		Upstream: update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
 		Reasoning: reasoning,
 		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
@@ -331,7 +352,7 @@ func (a *Server) configView() ConfigView {
 	effective, restart := a.manager.RestartStatus()
 	return ConfigView{
 		Listen: cfg.Listen, ServerKeys: maskSecrets(cfg.ServerKeys, false), ZenKeys: maskSecrets(cfg.ZenKeys, false), GoKeys: maskSecrets(cfg.GoKeys, false), Anonymous: cfg.Anonymous,
-		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
+		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, ProxyMode: cfg.ProxySelectionMode(), ProxyDisabled: cfg.ProxyDisabled, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
 		Performance: cfg.Performance, Logging: cfg.Logging, Prefer: cfg.Prefer, Reasoning: cfg.Reasoning,
 		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Listen: cfg.WebUI.Listen, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},
 		Effective: EffectiveView{Listen: effective.API, WebUIListen: effective.WebUI, WebUIEnabled: effective.WebUIEnabled},

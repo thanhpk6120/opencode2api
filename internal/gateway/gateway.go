@@ -63,16 +63,17 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*G
 	if err != nil {
 		return nil, err
 	}
-	transports, err := newTransportPool(cfg.RuntimeProxies(), cfg.Performance, cfg.Performance.AttemptTimeout(time.Duration(cfg.Retry.TimeoutSeconds)*time.Second))
+	mode := cfg.ProxySelectionMode()
+	transports, err := newTransportPool(cfg.RuntimeProxies(), cfg.Performance, cfg.Performance.AttemptTimeout(time.Duration(cfg.Retry.TimeoutSeconds)*time.Second), mode)
 	if err != nil {
 		return nil, err
 	}
 	cooldown := time.Duration(cfg.Performance.FailureCooldownSeconds) * time.Second
-	zenNodes, err := newNodePool(cfg.ZenKeys, transports, cooldown)
+	zenNodes, err := newNodePool(cfg.ZenKeys, transports, cooldown, mode)
 	if err != nil {
 		return nil, fmt.Errorf("zen node pool: %w", err)
 	}
-	goNodes, err := newNodePool(cfg.GoKeys, transports, cooldown)
+	goNodes, err := newNodePool(cfg.GoKeys, transports, cooldown, mode)
 	if err != nil {
 		return nil, fmt.Errorf("go node pool: %w", err)
 	}
@@ -86,7 +87,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*G
 		transports:     transports,
 		zenNodes:       zenNodes,
 		goNodes:        goNodes,
-		anonymous:      newAnonymousPool(cfg.Anonymous, transports, cooldown),
+		anonymous:      newAnonymousPool(cfg.Anonymous, transports, cooldown, mode),
 		catalog:        catalog,
 		monitor:        monitor,
 		attemptTimeout: attemptDeadline(cfg),

@@ -66,8 +66,9 @@
             <span class="nav-no">11</span><span data-i18n="t016">API key management</span>
           </button>
           <button data-page="rotation"><span class="nav-no">12</span><span data-i18n="t017">Model rotation</span></button>
+<button data-page="proxies"><span class="nav-no">13</span><span data-i18n="t434">Proxy management</span></button>
           <button data-page="availability">
-            <span class="nav-no">13</span><span data-i18n="t018">Free-model availability</span>
+            <span class="nav-no">14</span><span data-i18n="t018">Free-model availability</span>
           </button>
         </nav>
         <div class="sidebar-foot">
@@ -88,6 +89,73 @@
           </div>
         </header>
         <div id="restart-notice" class="notice hidden"></div>
+        
+        <section id="page-proxies" class="page hidden">
+          <div class="section">
+            <div class="section-head">
+              <div>
+                <h2 data-i18n="t434">Proxy management</h2>
+                <div class="section-caption" data-i18n="t435">Add, test, and switch egress proxies. Supports sticky single-proxy failover plus round-robin / random rotation.</div>
+              </div>
+              <button id="proxy-refresh" class="ghost" data-i18n="t023">Refresh status</button>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="proxy-mode" data-i18n="t438">Usage mode</label>
+                <select id="proxy-mode">
+                  <option value="sticky" data-i18n="t442">Sticky single proxy</option>
+                  <option value="roundrobin" data-i18n="t443">Round-robin in order</option>
+                  <option value="random" data-i18n="t444">Random pick</option>
+                </select>
+              </div>
+              <div class="field">
+                <label data-i18n="t451">Source</label>
+                <div id="proxy-mode-desc" class="section-caption" role="status"></div>
+              </div>
+            </div>
+            <div id="proxy-status" role="status" aria-live="polite" class="section-caption"></div>
+          </div>
+          <div class="section">
+            <div class="section-head">
+              <div>
+                <h2><span data-i18n="t436">Proxy list</span> <span id="proxy-count" class="section-caption"></span></h2>
+                <div class="section-caption" data-i18n="t437">Active proxies (credentials redacted). Disabling removes a proxy from traffic immediately.</div>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th data-i18n="t448">Address</th>
+                    <th data-i18n="t449">Health</th>
+                    <th data-i18n="t450">Enabled</th>
+                    <th data-i18n="t452">Bindings</th>
+                    <th data-i18n="t032">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="proxy-list"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-head">
+              <div>
+                <h2 data-i18n="t445">Bulk-add proxies (one per line)</h2>
+              </div>
+            </div>
+            <form id="proxy-add-form">
+              <div class="form-grid">
+                <div class="field full">
+                  <label for="proxy-add-lines" data-i18n="t446">Format: host:port:user:pass or host:port; full URLs also work. Example: 10.0.0.1:8080:user:pass</label>
+                  <textarea id="proxy-add-lines" rows="4" placeholder="10.0.0.1:8080:user:pass"></textarea>
+                </div>
+              </div>
+              <div class="actions">
+                <button id="proxy-add" class="primary" data-i18n="t447">Add proxies</button>
+              </div>
+            </form>
+          </div>
+        </section>
         <section id="page-availability" class="page hidden">
           <div class="section">
             <div class="section-head">

@@ -64,6 +64,12 @@ func (g *Gateway) rebindFailedProxy(proxy *proxyTransport) (zenMoved, goMoved in
 		return 0, 0
 	}
 	wasHealthy := proxy.healthy.Swap(false)
+	// In sticky mode the pinned proxy follows real proxy failures (timeouts
+	// and connection refusals via isProxyFailure). AI model errors (HTTP
+	// 4xx/5xx) never reach this path: they only cool the key.
+	if g.transports != nil && g.transports.mode == config.ProxyModeSticky {
+		g.transports.advanceSticky(proxy)
+	}
 	return g.rebindUnavailableProxy(proxy, wasHealthy)
 }
 

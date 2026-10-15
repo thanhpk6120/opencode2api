@@ -13,7 +13,8 @@ let csrf = "",
   toastTimer = null;
 function pageMeta() {
   return {
-    availability: ["13", t("t018"), t("t207")],
+    proxies: ["13", t("t434"), t("t435")],
+    availability: ["14", t("t018"), t("t207")],
     rotation: ["12", t("t017"), t("t208")],
     overview: ["01", t("t007"), t("t019")],
     guide: ["02", t("t008"), t("t209")],
@@ -130,6 +131,7 @@ function openPage(page) {
     }, 60000);
   }
   if (page === "rotation") loadRotation();
+  if (page === "proxies") loadProxies();
   if (page === "availability") loadAvailability();
   if (page === "api-keys") loadAPIKeys();
   if (page === "playground" && !debugData) loadDebugModels();
@@ -1402,6 +1404,132 @@ $("#rotation-form").onsubmit = async (event) => {
     button.disabled = false;
   }
 };
+let proxiesLoading = false,
+  proxyMode = "roundrobin";
+const proxyModeDesc = { sticky: "t439", roundrobin: "t440", random: "t441" };
+async function loadProxies() {
+  if (proxiesLoading) return;
+  proxiesLoading = true;
+  $("#proxy-refresh").disabled = true;
+  try {
+    const data = await api("/api/proxies");
+    if (!csrf) return;
+    proxyMode = data.proxy_mode || "roundrobin";
+    $("#proxy-mode").value = proxyMode;
+    $("#proxy-mode-desc").textContent = t(proxyModeDesc[proxyMode] || "t440");
+    renderProxies(data.proxies || []);
+  } catch (error) {
+    $("#proxy-status").textContent = t("t472", error.message);
+  } finally {
+    proxiesLoading = false;
+    $("#proxy-refresh").disabled = false;
+  }
+}
+function renderProxies(proxies) {
+  $("#proxy-count").textContent = t("t471", proxies.length, proxies.filter((p) => p.enabled).length);
+  $("#proxy-status").textContent = "";
+  const host = $("#proxy-list");
+  host.replaceChildren();
+  for (const proxy of proxies) {
+    const row = document.createElement("tr");
+    appendCell(row, proxy.address, "mono");
+    appendCell(row, proxy.healthy ? t("t453") : t("t454"), proxy.healthy ? "status ok" : "status bad");
+    appendCell(row, proxy.enabled ? t("t455") : t("t456"), proxy.enabled ? "status ok" : "status warn");
+    appendCell(row, t("t231", proxy.zen_keys, proxy.go_keys, proxy.anonymous ? t("t422") : t("t423")));
+    const cell = document.createElement("td"),
+      actions = document.createElement("div");
+    actions.className = "key-actions";
+    for (const [label, action] of [
+      [t("t457"), (button) => testProxy(proxy, button)],
+      [t("t458"), (button) => editProxy(proxy, button)],
+      [proxy.enabled ? t("t461") : t("t460"), (button) => mutateProxy(proxy.id, "PATCH", { enabled: !proxy.enabled }, button, "t468")],
+      [t("t459"), (button) => {
+        if (confirm(t("t465"))) mutateProxy(proxy.id, "DELETE", null, button, "t469");
+      }],
+    ]) {
+      const button = document.createElement("button");
+      button.className = "ghost";
+      button.textContent = label;
+      button.onclick = () => action(button);
+      actions.appendChild(button);
+    }
+    cell.appendChild(actions);
+    row.appendChild(cell);
+    host.appendChild(row);
+  }
+  if (!host.children.length) emptyRow(host, 5);
+}
+async function mutateProxy(id, method, body, button, okMsg) {
+  button.disabled = true;
+  try {
+    const data = await api(`/api/proxies/${encodeURIComponent(id)}`, {
+      method,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    if (!csrf) return;
+    proxyMode = data.proxy_mode || proxyMode;
+    $("#proxy-mode").value = proxyMode;
+    $("#proxy-mode-desc").textContent = t(proxyModeDesc[proxyMode] || "t440");
+    renderProxies(data.proxies || []);
+    await loadConfig();
+    toast(t(okMsg));
+  } catch (error) {
+    toast(tx(error.message), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+async function testProxy(proxy, button) {
+  button.disabled = true;
+  const old = button.textContent;
+  button.textContent = t("t462");
+  try {
+    const data = await api("/api/proxies/test", { method: "POST", body: JSON.stringify({ id: proxy.id }) });
+    if (!csrf) return;
+    toast(data.ok ? t("t463", data.address, data.http_status, data.latency_ms) : t("t464", data.address, data.detail), !data.ok);
+    loadProxies();
+  } catch (error) {
+    toast(tx(error.message), true);
+  } finally {
+    button.disabled = false;
+    button.textContent = old;
+  }
+}
+function editProxy(proxy, button) {
+  const value = prompt(t("t466"), "");
+  if (value === null || !value.trim()) return;
+  mutateProxy(proxy.id, "PATCH", { value: value.trim() }, button, "t468");
+}
+$("#proxy-refresh").onclick = () => loadProxies();
+$("#proxy-mode").onchange = async (event) => {
+  const mode = event.target.value;
+  try {
+    const data = await api("/api/proxies/mode", { method: "PUT", body: JSON.stringify({ mode }) });
+    if (!csrf) return;
+    proxyMode = data.proxy_mode || mode;
+    $("#proxy-mode-desc").textContent = t(proxyModeDesc[proxyMode] || "t440");
+    renderProxies(data.proxies || []);
+    await loadConfig();
+    toast(t("t470"));
+  } catch (error) {
+    toast(tx(error.message), true);
+    $("#proxy-mode").value = proxyMode;
+  }
+};
+$("#proxy-add-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const lines = $("#proxy-add-lines").value.split(/\r?\n/);
+  try {
+    const data = await api("/api/proxies", { method: "POST", body: JSON.stringify({ lines }) });
+    if (!csrf) return;
+    $("#proxy-add-lines").value = "";
+    renderProxies(data.proxies || []);
+    await loadConfig();
+    toast(t("t467"));
+  } catch (error) {
+    toast(tx(error.message), true);
+  }
+});
 boot();
 // ---- i18n: re-render dynamic content on language change ----
 window.o2aLangChanged = () => {

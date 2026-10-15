@@ -25,6 +25,8 @@ type Config struct {
 	Anonymous         bool                         `json:"anonymous"`
 	Proxies           []string                     `json:"proxies"`
 	ProxyFile         string                       `json:"proxyfile"`
+	ProxyMode         string                       `json:"proxy_mode,omitempty"`
+	ProxyDisabled     []string                     `json:"proxy_disabled,omitempty"`
 	Upstream          UpstreamConfig               `json:"upstream"`
 	Retry             RetryConfig                  `json:"retry"`
 	Models            ModelsConfig                 `json:"models"`
@@ -240,6 +242,10 @@ func Normalize(path string, cfg Config) (Config, error) {
 			return Config{}, errors.New("webui.session_ttl_minutes must be between 5 and 10080")
 		}
 	}
+	if cfg.ProxyMode != "" && cfg.ProxyMode != ProxyModeSticky && cfg.ProxyMode != ProxyModeRoundRobin && cfg.ProxyMode != ProxyModeRandom {
+		return Config{}, fmt.Errorf("proxy_mode must be sticky, roundrobin, or random")
+	}
+	trimList(&cfg.ProxyDisabled)
 	for _, raw := range cfg.RuntimeProxies() {
 		if raw == "direct" {
 			continue
@@ -323,14 +329,51 @@ func (cfg Config) ForcedEffort(model string) string {
 // RuntimeProxies returns the resolved proxy list, including proxyfile entries.
 // Config.Proxies intentionally remains the list stored in config.json so a
 // save never duplicates values loaded from proxyfile.
-func (cfg Config) RuntimeProxies() []string {
-	if len(cfg.effectiveProxies) > 0 {
-		return cfg.effectiveProxies
+// EffectiveProxyList resolves proxies minus operator-disabled entries.
+// Disabled entries are matched by fingerprint so credential rotation keeps
+// the flag attached to the same proxy.
+func EffectiveProxyList(proxies, disabled []string) []string {
+	if len(disabled) == 0 {
+		return append([]string(nil), proxies...)
 	}
-	if len(cfg.Proxies) > 0 {
-		return cfg.Proxies
+	blocked := make(map[string]struct{}, len(disabled))
+	for _, id := range disabled {
+		blocked[id] = struct{}{}
+	}
+	out := make([]string, 0, len(proxies))
+	for _, raw := range proxies {
+		if _, ok := blocked[Fingerprint(raw)]; ok {
+			continue
+		}
+		if _, ok := blocked[raw]; ok {
+			continue
+		}
+		out = append(out, raw)
+	}
+	return out
+}
+
+func (cfg Config) RuntimeProxies() []string {
+	base := cfg.Proxies
+	if len(cfg.effectiveProxies) > 0 {
+		base = cfg.effectiveProxies
+	}
+	out := EffectiveProxyList(base, cfg.ProxyDisabled)
+	if len(out) > 0 {
+		return out
 	}
 	return []string{"direct"}
+}
+
+// ProxySelectionMode returns the configured proxy selection mode, defaulting
+// to round-robin rotation for configs that predate the setting.
+func (cfg Config) ProxySelectionMode() string {
+	switch cfg.ProxyMode {
+	case ProxyModeSticky, ProxyModeRoundRobin, ProxyModeRandom:
+		return cfg.ProxyMode
+	default:
+		return ProxyModeRoundRobin
+	}
 }
 
 // PasswordForSave ensures resolved-only data is excluded. The method is kept
@@ -351,6 +394,7 @@ func Clone(cfg Config) Config {
 	cfg.ZenKeys = append([]string(nil), cfg.ZenKeys...)
 	cfg.GoKeys = append([]string(nil), cfg.GoKeys...)
 	cfg.Proxies = append([]string(nil), cfg.Proxies...)
+	cfg.ProxyDisabled = append([]string(nil), cfg.ProxyDisabled...)
 	cfg.effectiveProxies = append([]string(nil), cfg.effectiveProxies...)
 	if cfg.Models.Protocols != nil {
 		protocols := make(map[string]string, len(cfg.Models.Protocols))

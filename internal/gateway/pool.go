@@ -31,15 +31,24 @@ type proxyTransport struct {
 
 type transportPool struct {
 	items []*proxyTransport
+	// mode selects how request cursors pick their starting proxy:
+	// sticky pins every request to one proxy until it fails, roundrobin
+	// walks proxies in order, random picks a fresh start per request.
+	mode string
+	// sticky holds the pinned proxy index for sticky mode. It advances to
+	// the next healthy proxy when the pinned one fails.
+	sticky atomic.Uint64
 }
 
 // anonymousPool gives the shared OpenCode "public" credential an independent
 // cooldown per proxy. Unlike key nodes, anonymous nodes are never rebound:
 // changing proxy is the failover mechanism because Zen rate-limits them by IP.
 type anonymousPool struct {
-	nodes    []*anonymousNode
-	next     atomic.Uint64
-	cooldown time.Duration
+	nodes      []*anonymousNode
+	next       atomic.Uint64
+	cooldown   time.Duration
+	mode       string
+	transports *transportPool
 }
 
 type anonymousNode struct {
@@ -54,8 +63,11 @@ type anonymousCursor struct {
 	offset int
 }
 
-func newAnonymousPool(enabled bool, transports *transportPool, cooldown time.Duration) *anonymousPool {
-	pool := &anonymousPool{cooldown: cooldown}
+func newAnonymousPool(enabled bool, transports *transportPool, cooldown time.Duration, mode string) *anonymousPool {
+	if mode == "" {
+		mode = config.ProxyModeRoundRobin
+	}
+	pool := &anonymousPool{cooldown: cooldown, mode: mode, transports: transports}
 	if !enabled || transports == nil {
 		return pool
 	}
@@ -77,6 +89,15 @@ func (p *anonymousPool) CursorFor(affinity string) anonymousCursor {
 	if p == nil || len(p.nodes) == 0 {
 		return anonymousCursor{pool: p}
 	}
+	if p.mode == config.ProxyModeRandom {
+		return anonymousCursor{pool: p, start: rand.IntN(len(p.nodes))}
+	}
+	if p.mode == config.ProxyModeSticky && len(p.nodes) > 0 {
+		pinned := p.pinnedIndex()
+		if pinned >= 0 && pinned < len(p.nodes) {
+			return anonymousCursor{pool: p, start: pinned}
+		}
+	}
 	start := 0
 	if affinity == "" {
 		start = int((p.next.Add(1) - 1) % uint64(len(p.nodes)))
@@ -86,6 +107,23 @@ func (p *anonymousPool) CursorFor(affinity string) anonymousCursor {
 		start = int(hash.Sum64() % uint64(len(p.nodes)))
 	}
 	return anonymousCursor{pool: p, start: start}
+}
+
+// pinnedIndex returns the sticky proxy position mapped onto the anonymous
+// node list (nodes mirror transports 1:1 in construction order), advancing
+// past unhealthy proxies, or -1 when none is healthy.
+func (p *anonymousPool) pinnedIndex() int {
+	if p == nil || len(p.nodes) == 0 || p.transports == nil {
+		return -1
+	}
+	pinned := int(p.transports.sticky.Load() % uint64(len(p.nodes)))
+	for offset := 0; offset < len(p.nodes); offset++ {
+		idx := (pinned + offset) % len(p.nodes)
+		if p.nodes[idx].proxy.healthy.Load() {
+			return idx
+		}
+	}
+	return -1
 }
 
 // Next visits each healthy, non-cooling proxy at most once per cursor.
@@ -161,6 +199,40 @@ func (p *anonymousPool) MarkFailure(node *anonymousNode, resp *http.Response, er
 	node.cooldownUntil.Store(time.Now().Add(delay).UnixNano())
 }
 
+// stickyProxy returns the pinned proxy for sticky mode, skipping to the
+// next healthy one when the pinned proxy is down. It never marks anything:
+// health is owned by syncProxyResult/CheckHealth.
+func (p *transportPool) stickyProxy() *proxyTransport {
+	if p == nil || len(p.items) == 0 {
+		return nil
+	}
+	pinned := int(p.sticky.Load() % uint64(len(p.items)))
+	for offset := 0; offset < len(p.items); offset++ {
+		candidate := p.items[(pinned+offset)%len(p.items)]
+		if candidate.healthy.Load() {
+			return candidate
+		}
+	}
+	return p.items[pinned%len(p.items)]
+}
+
+// advanceSticky moves the pinned proxy forward after a sticky failure so the
+// next request starts on the following healthy proxy.
+func (p *transportPool) advanceSticky(failed *proxyTransport) {
+	if p == nil || len(p.items) < 2 {
+		return
+	}
+	if failed != nil {
+		for i, item := range p.items {
+			if item == failed {
+				p.sticky.Store(uint64((i + 1) % len(p.items)))
+				return
+			}
+		}
+	}
+	p.sticky.Add(1)
+}
+
 func (p *transportPool) hasHealthy() bool {
 	for _, proxy := range p.items {
 		if proxy.healthy.Load() {
@@ -182,8 +254,11 @@ func (p *transportPool) healthCounts() (total, healthy int) {
 	return len(p.items), healthy
 }
 
-func newTransportPool(proxies []string, cfg config.PerformanceConfig, responseHeaderTimeout time.Duration) (*transportPool, error) {
-	p := &transportPool{items: make([]*proxyTransport, 0, len(proxies))}
+func newTransportPool(proxies []string, cfg config.PerformanceConfig, responseHeaderTimeout time.Duration, mode string) (*transportPool, error) {
+	if mode == "" {
+		mode = config.ProxyModeRoundRobin
+	}
+	p := &transportPool{items: make([]*proxyTransport, 0, len(proxies)), mode: mode}
 	for _, raw := range proxies {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = cfg.MaxIdleConns
@@ -308,20 +383,25 @@ type nodePool struct {
 	cooldown     time.Duration
 	bindingsMu   sync.Mutex
 	bindingCount []int
+	mode         string
 }
 
 // newNodePool distributes keys over proxies in round-robin order. When there
 // are fewer keys than proxies, the remaining proxies are intentionally idle and
 // can take over a key immediately if an active proxy fails.
-func newNodePool(keys []string, transports *transportPool, cooldown time.Duration) (*nodePool, error) {
+func newNodePool(keys []string, transports *transportPool, cooldown time.Duration, mode string) (*nodePool, error) {
 	if transports == nil || len(transports.items) == 0 {
 		return nil, fmt.Errorf("at least one proxy transport is required")
+	}
+	if mode == "" {
+		mode = config.ProxyModeRoundRobin
 	}
 	pool := &nodePool{
 		nodes:        make([]*upstreamNode, 0, len(keys)),
 		transports:   transports,
 		cooldown:     cooldown,
 		bindingCount: make([]int, len(transports.items)),
+		mode:         mode,
 	}
 	if len(keys) == 0 {
 		return pool, nil
@@ -461,6 +541,9 @@ func (p *nodePool) Cursor() nodeCursor {
 	if len(p.nodes) == 0 {
 		return nodeCursor{pool: p}
 	}
+	if p != nil && p.mode == config.ProxyModeRandom {
+		return nodeCursor{pool: p, next: rand.IntN(len(p.nodes))}
+	}
 	return nodeCursor{pool: p, next: int((p.next.Add(1) - 1) % uint64(len(p.nodes)))}
 }
 
@@ -469,7 +552,22 @@ func (p *nodePool) Cursor() nodeCursor {
 // key while retaining Next's cooldown-aware failover behavior. Empty affinity
 // keys keep the round-robin behavior used by background tasks.
 func (p *nodePool) CursorFor(affinity string) nodeCursor {
-	if affinity == "" || len(p.nodes) == 0 {
+	if len(p.nodes) == 0 {
+		return p.Cursor()
+	}
+	if p.mode == config.ProxyModeRandom {
+		return nodeCursor{pool: p, next: rand.IntN(len(p.nodes))}
+	}
+	if p.mode == config.ProxyModeSticky && p.transports != nil {
+		if pinned := p.transports.stickyProxy(); pinned != nil {
+			for i, node := range p.nodes {
+				if p.Proxy(node) == pinned {
+					return nodeCursor{pool: p, next: i}
+				}
+			}
+		}
+	}
+	if affinity == "" {
 		return p.Cursor()
 	}
 	hash := fnv.New64a()
