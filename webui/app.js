@@ -141,6 +141,14 @@ function openPage(page) {
   }
 }
 $$(".nav button").forEach((button) => (button.onclick = () => openPage(button.dataset.page)));
+$(".nav")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("button[data-page]");
+  if (btn && btn.dataset.page) openPage(btn.dataset.page);
+});
+window.addEventListener("hashchange", () => {
+  const p = location.hash.slice(1);
+  if (pages[p]) openPage(p);
+});
 async function loadConfig() {
   config = await api("/api/config");
   fillConfig(config);

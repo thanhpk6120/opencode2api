@@ -210,12 +210,15 @@ pre,
   position: sticky;
   top: 0;
   height: 100vh;
+  max-height: 100vh;
   color: #f8f2e4;
   background: var(--forest);
   display: flex;
   flex-direction: column;
   padding: 24px 18px 20px;
   border-right: 6px solid var(--orange);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 .sidebar-head {
   padding: 4px 10px 25px;
