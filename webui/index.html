@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -12,25 +12,25 @@
         <div class="manual-mark"><i>O2</i> OPENCODE GATEWAY</div>
         <div>
           <div class="eyebrow">Operator field manual / 2026</div>
-          <h1>把协议、路由与运行状态放在一张桌面上。</h1>
-          <p>一个无外部前端依赖的本地控制面。配置、检查、接入，然后让 Gateway 保持可解释。</p>
+          <h1 data-i18n="t001">Protocols, routing, and runtime state on one desk.</h1>
+          <p data-i18n="t002">A local control plane with no external frontend dependencies. Configure, inspect, onboard — and keep the gateway explainable.</p>
         </div>
         <div class="mono">CHAT · RESPONSES · ANTHROPIC</div>
       </div>
       <div class="login-panel">
         <form id="login-form" class="login-card">
           <div class="eyebrow">Restricted console</div>
-          <h2>管理登录</h2>
+          <h2 data-i18n="t003">Admin sign-in</h2>
           <div class="rule"></div>
           <div class="field">
-            <label>账号</label><input id="login-user" autocomplete="username" required />
+            <label data-i18n="t004">Username</label><input id="login-user" autocomplete="username" required />
           </div>
           <div class="field">
-            <label>密码</label
+            <label data-i18n="t005">Password</label
             ><input id="login-pass" type="password" autocomplete="current-password" required />
           </div>
           <div id="login-error" class="error"></div>
-          <button class="primary wide">进入 Field Manual</button>
+          <div class="field lang-field"><label for="login-lang">Language</label><select id="login-lang" class="lang-select"><option value="en">English</option><option value="zh">中文</option><option value="vi">Tiếng Việt</option></select></div><button class="primary wide" data-i18n="t006">Enter Field Manual</button>
         </form>
       </div>
     </section>
@@ -45,29 +45,29 @@
         </div>
         <nav class="nav">
           <button data-page="overview" class="active">
-            <span class="nav-no">01</span><span>运行桌面</span>
+            <span class="nav-no">01</span><span data-i18n="t007">Dashboard</span>
           </button>
-          <button data-page="guide"><span class="nav-no">02</span><span>首次运行</span></button>
-          <button data-page="access"><span class="nav-no">03</span><span>接入手册</span></button>
-          <button data-page="usage"><span class="nav-no">04</span><span>Token 用量</span></button>
+          <button data-page="guide"><span class="nav-no">02</span><span data-i18n="t008">First run</span></button>
+          <button data-page="access"><span class="nav-no">03</span><span data-i18n="t009">Onboarding</span></button>
+          <button data-page="usage"><span class="nav-no">04</span><span data-i18n="t010">Token usage</span></button>
           <button data-page="playground">
             <span class="nav-no">05</span><span>Playground</span>
           </button>
           <button data-page="diagnostics">
-            <span class="nav-no">06</span><span>路由诊断</span>
+            <span class="nav-no">06</span><span data-i18n="t011">Routing diagnostics</span>
           </button>
-          <button data-page="config"><span class="nav-no">07</span><span>配置中心</span></button>
-          <button data-page="logs"><span class="nav-no">08</span><span>事件日志</span></button>
-          <button data-page="account"><span class="nav-no">09</span><span>账号安全</span></button>
+          <button data-page="config"><span class="nav-no">07</span><span data-i18n="t012">Configuration</span></button>
+          <button data-page="logs"><span class="nav-no">08</span><span data-i18n="t013">Event logs</span></button>
+          <button data-page="account"><span class="nav-no">09</span><span data-i18n="t014">Account security</span></button>
           <button data-page="model-quotas">
-            <span class="nav-no">10</span><span>模型与额度</span>
+            <span class="nav-no">10</span><span data-i18n="t015">Models &amp; quotas</span>
           </button>
           <button data-page="api-keys">
-            <span class="nav-no">11</span><span>API Key 管理</span>
+            <span class="nav-no">11</span><span data-i18n="t016">API key management</span>
           </button>
-          <button data-page="rotation"><span class="nav-no">12</span><span>模型轮转</span></button>
+          <button data-page="rotation"><span class="nav-no">12</span><span data-i18n="t017">Model rotation</span></button>
           <button data-page="availability">
-            <span class="nav-no">13</span><span>免费模型可用性</span>
+            <span class="nav-no">13</span><span data-i18n="t018">Free-model availability</span>
           </button>
         </nav>
         <div class="sidebar-foot">
@@ -79,41 +79,35 @@
         <header class="topbar">
           <div>
             <div class="eyebrow" id="page-index">Section 01</div>
-            <h1 id="page-title">运行桌面</h1>
-            <div class="subtitle" id="page-sub">最近一小时、进程累计与当前资源状态。</div>
+            <h1 id="page-title" data-i18n="t007">Dashboard</h1>
+            <div class="subtitle" id="page-sub" data-i18n="t019">Last hour, process totals, and current resource state.</div>
           </div>
           <div class="toolbar">
-            <button id="refresh-now" class="ghost">立即刷新</button
-            ><button id="logout" class="ghost">退出</button>
+            <select id="lang-switch" class="ghost lang-select" aria-label="Language"><option value="en">English</option><option value="zh">中文</option><option value="vi">Tiếng Việt</option></select><button id="refresh-now" class="ghost" data-i18n="t020">Refresh now</button
+            ><button id="logout" class="ghost" data-i18n="t021">Sign out</button>
           </div>
         </header>
         <div id="restart-notice" class="notice hidden"></div>
         <section id="page-availability" class="page hidden">
           <div class="section">
             <div class="section-head">
-              <h2>免费模型探测</h2>
-              <button id="availability-refresh" class="ghost">刷新状态</button>
+              <h2 data-i18n="t022">Free-model probing</h2>
+              <button id="availability-refresh" class="ghost" data-i18n="t023">Refresh status</button>
             </div>
-            <p>
-              检查名称含 free 或元数据零价格且未弃用的模型。优先匿名通道，再尝试 Zen
-              Key；明确模型失效才禁用并在 24 小时后复测。临时错误不新增禁用：已启用模型 1
-              小时后重试，已禁用模型保留原原因并在 24
-              小时后重试。恢复启用或切为手动后，该模型保持启用且不再自动探测；切回自动后，下一轮调度即安排探测。
-              System One 使用专用的 1+1 决策问题。设置 auto 强度后，显示探测验证过的最高档位。
-            </p>
+            <p data-i18n="t024">Probes models whose names contain free or whose metadata reports zero price without deprecation. Tries the anonymous lane first, then a Zen key; a model is disabled only on an explicit not-found signal and rechecked after 24 hours. Transient errors never create a new disable: enabled models retry after 1 hour, disabled ones keep their original reason and retry after 24 hours. A restored or manual model stays enabled and skips automatic probing; switching back to automatic schedules a probe on the next pass. System One uses a dedicated 1+1 decision question. With auto effort, the highest probed level is shown.</p>
             <p id="availability-error" role="status"></p>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>模型</th>
-                    <th>状态</th>
-                    <th>通道 / 结果</th>
-                    <th>控制</th>
-                    <th>已验证思考档位</th>
-                    <th>上次探测</th>
-                    <th>下次探测</th>
-                    <th>操作</th>
+                    <th data-i18n="t025">Model</th>
+                    <th data-i18n="t026">Status</th>
+                    <th data-i18n="t027">Channel / result</th>
+                    <th data-i18n="t028">Control</th>
+                    <th data-i18n="t029">Verified thinking level</th>
+                    <th data-i18n="t030">Last probe</th>
+                    <th data-i18n="t031">Next probe</th>
+                    <th data-i18n="t032">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="availability-models"></tbody>
@@ -126,7 +120,7 @@
             <div class="metric-card">
               <div class="label">Last hour requests</div>
               <div id="m-total" class="metric">—</div>
-              <div class="metric-note">最近 60 分钟</div>
+              <div class="metric-note" data-i18n="t033">Last 60 minutes</div>
             </div>
             <div class="metric-card">
               <div class="label">Success rate</div>
@@ -136,29 +130,29 @@
             <div class="metric-card">
               <div class="label">P95 latency</div>
               <div id="m-p95" class="metric">—</div>
-              <div class="metric-note">端到端毫秒</div>
+              <div class="metric-note" data-i18n="t034">End-to-end ms</div>
             </div>
             <div class="metric-card">
               <div class="label">Active / stream</div>
               <div id="m-active" class="metric">—</div>
-              <div class="metric-note">当前并发</div>
+              <div class="metric-note" data-i18n="t035">Current concurrency</div>
             </div>
           </div>
           <div class="split">
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>Proxy 节点</h2>
-                  <div class="section-caption">这里显示代理节点，不将其描述为出口 IP。</div>
+                  <h2 data-i18n="t036">Proxy nodes</h2>
+                  <div class="section-caption" data-i18n="t037">Proxy nodes are shown here; they are not described as egress IPs.</div>
                 </div>
               </div>
               <div class="table-wrap">
                 <table class="table">
                   <thead>
                     <tr>
-                      <th>节点</th>
-                      <th>健康</th>
-                      <th>绑定</th>
+                      <th data-i18n="t038">Node</th>
+                      <th data-i18n="t039">Health</th>
+                      <th data-i18n="t040">Bindings</th>
                     </tr>
                   </thead>
                   <tbody id="proxy-table"></tbody>
@@ -168,17 +162,17 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>Key 池</h2>
-                  <div class="section-caption">仅显示 Key 最后 5 位与冷却状态。</div>
+                  <h2 data-i18n="t041">Key pool</h2>
+                  <div class="section-caption" data-i18n="t042">Only the last 5 key characters and cooldown state are shown.</div>
                 </div>
               </div>
               <div class="table-wrap">
                 <table class="table">
                   <thead>
                     <tr>
-                      <th>Key 尾码</th>
+                      <th data-i18n="t043">Key suffix</th>
                       <th>Tier</th>
-                      <th>状态</th>
+                      <th data-i18n="t026">Status</th>
                     </tr>
                   </thead>
                   <tbody id="key-table"></tbody>
@@ -189,8 +183,8 @@
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>请求分布</h2>
-                <div class="section-caption">端点、模型、Tier 与状态码的最近一小时聚合。</div>
+                <h2 data-i18n="t044">Request breakdown</h2>
+                <div class="section-caption" data-i18n="t045">Last-hour aggregation by endpoint, model, tier, and status code.</div>
               </div>
             </div>
             <div id="breakdowns" class="split"></div>
@@ -199,8 +193,8 @@
         <section id="page-guide" class="page hidden">
           <div class="section-head">
             <div>
-              <h2>六步上线检查</h2>
-              <div class="section-caption">状态来自当前配置与实时资源，不写入浏览器存储。</div>
+              <h2 data-i18n="t046">Six-step launch checklist</h2>
+              <div class="section-caption" data-i18n="t047">State comes from the current config and live resources; nothing is written to browser storage.</div>
             </div>
           </div>
           <div id="guide-steps" class="guide"></div>
@@ -209,44 +203,41 @@
           <div class="access-grid">
             <aside class="toc">
               <div class="eyebrow">Quick index</div>
-              <button data-scroll="access-base">基础地址</button
-              ><button data-scroll="access-curl">三种协议</button
-              ><button data-scroll="access-sdk">SDK 示例</button
-              ><button data-scroll="access-notes">接入注意</button>
+              <button data-scroll="access-base" data-i18n="t048">Base URL</button
+              ><button data-scroll="access-curl" data-i18n="t049">Three protocols</button
+              ><button data-scroll="access-sdk" data-i18n="t050">SDK examples</button
+              ><button data-scroll="access-notes" data-i18n="t051">Integration notes</button>
             </aside>
             <div>
               <div id="access-base" class="section">
                 <div class="section-head">
                   <div>
-                    <h2>基础地址</h2>
-                    <div class="section-caption">示例不会写入真实 Server Key。</div>
+                    <h2 data-i18n="t048">Base URL</h2>
+                    <div class="section-caption" data-i18n="t052">Examples never embed your real server key.</div>
                   </div>
                 </div>
                 <div class="field">
-                  <label>推导的 API Base</label><input id="access-base-value" readonly />
+                  <label data-i18n="t053">Derived API base</label><input id="access-base-value" readonly />
                 </div>
                 <div class="field">
-                  <label>示例模型</label><input id="access-model" value="YOUR_MODEL" />
+                  <label data-i18n="t054">Example model</label><input id="access-model" value="YOUR_MODEL" />
                 </div>
               </div>
               <div id="access-curl" class="section">
-                <h2>三种协议入口</h2>
+                <h2 data-i18n="t055">Three protocol endpoints</h2>
                 <div id="access-protocol-examples"></div>
               </div>
               <div id="access-sdk" class="section">
-                <h2>Python 与 JavaScript</h2>
+                <h2 data-i18n="t056">Python &amp; JavaScript</h2>
                 <div id="access-sdk-examples"></div>
               </div>
               <div id="access-notes" class="section">
-                <h2>接入注意</h2>
+                <h2 data-i18n="t051">Integration notes</h2>
                 <ul>
-                  <li>OpenAI 兼容客户端使用 <code>Authorization: Bearer YOUR_API_KEY</code>。</li>
-                  <li>
-                    Anthropic 客户端可使用 <code>x-api-key</code>，路径为
-                    <code>/v1/messages</code>。
-                  </li>
-                  <li>流式请求会保持原协议事件；跨协议时由 Gateway 转换。</li>
-                  <li>若配置监听地址为 <code>0.0.0.0</code>，示例会改用当前浏览器主机名。</li>
+                  <li><span data-i18n="t057">OpenAI-compatible clients use</span> <code>Authorization: Bearer YOUR_API_KEY</code><span data-i18n="t058">.</span></li>
+                  <li><span data-i18n="t059">Anthropic clients may use</span> <code>x-api-key</code><span data-i18n="t060">, path</span> <code>/v1/messages</code><span data-i18n="t058">.</span></li>
+                  <li data-i18n="t061">Streaming requests keep their native protocol events; the gateway converts across protocols.</li>
+                  <li><span data-i18n="t062">If the configured listen address is</span> <code>0.0.0.0</code><span data-i18n="t063">, examples use the current browser hostname instead.</span></li>
                 </ul>
               </div>
             </div>
@@ -257,29 +248,29 @@
             <div class="metric-card">
               <div class="label">Usage coverage</div>
               <div id="u-coverage" class="metric">—</div>
-              <div class="metric-note">有 Token 回报 / 推理请求</div>
+              <div class="metric-note" data-i18n="t064">Requests with token / reasoning usage</div>
             </div>
             <div class="metric-card">
               <div class="label">Total tokens</div>
               <div id="u-total" class="metric">—</div>
-              <div class="metric-note">最近 60 分钟</div>
+              <div class="metric-note" data-i18n="t033">Last 60 minutes</div>
             </div>
             <div class="metric-card">
               <div class="label">Cached tokens</div>
               <div id="u-cached" class="metric">—</div>
-              <div class="metric-note">上游回报的缓存命中</div>
+              <div class="metric-note" data-i18n="t065">Upstream-reported cache hits</div>
             </div>
             <div class="metric-card">
               <div class="label">Reasoning tokens</div>
               <div id="u-reasoning" class="metric">—</div>
-              <div class="metric-note">上游回报的推理用量</div>
+              <div class="metric-note" data-i18n="t066">Upstream-reported reasoning usage</div>
             </div>
           </div>
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>每分钟 Token 趋势</h2>
-                <div class="section-caption">最近 60 分钟；悬停查看输入、输出与总量。</div>
+                <h2 data-i18n="t067">Per-minute token trend</h2>
+                <div class="section-caption" data-i18n="t068">Last 60 minutes; hover for input, output, and total.</div>
               </div>
             </div>
             <div id="usage-trend" class="trend-chart"></div>
@@ -288,18 +279,18 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>模型排行</h2>
-                  <div class="section-caption">按 total_tokens 排序。</div>
+                  <h2 data-i18n="t069">Top models</h2>
+                  <div class="section-caption" data-i18n="t070">Sorted by total_tokens.</div>
                 </div>
               </div>
               <div class="table-wrap">
                 <table class="table">
                   <thead>
                     <tr>
-                      <th>模型</th>
-                      <th>输入</th>
-                      <th>输出</th>
-                      <th>总量</th>
+                      <th data-i18n="t025">Model</th>
+                      <th data-i18n="t071">Input</th>
+                      <th data-i18n="t072">Output</th>
+                      <th data-i18n="t073">Total</th>
                     </tr>
                   </thead>
                   <tbody id="usage-models"></tbody>
@@ -309,8 +300,8 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>Tier 分布</h2>
-                  <div class="section-caption">Zen / Go 的 Token 去向。</div>
+                  <h2 data-i18n="t074">Tier distribution</h2>
+                  <div class="section-caption" data-i18n="t075">Where Zen / Go tokens went.</div>
                 </div>
               </div>
               <div id="usage-tiers"></div>
@@ -322,13 +313,13 @@
             <form id="play-form" class="section">
               <div class="section-head">
                 <div>
-                  <h2>三协议请求台</h2>
-                  <div class="section-caption">服务端强制非流式，并经由真实 Gateway 路由。</div>
+                  <h2 data-i18n="t076">Three-protocol console</h2>
+                  <div class="section-caption" data-i18n="t077">Server forces non-streaming and routes through the real gateway.</div>
                 </div>
               </div>
               <div class="form-grid">
                 <div class="field">
-                  <label>入口协议</label
+                  <label data-i18n="t078">Entry protocol</label
                   ><select id="play-protocol">
                     <option value="chat">Chat Completions</option>
                     <option value="responses">Responses</option>
@@ -336,41 +327,38 @@
                   </select>
                 </div>
                 <div class="field">
-                  <label>模型</label
+                  <label data-i18n="t025">Model</label
                   ><select id="play-model"></select>
                 </div>
                 <div class="field full">
-                  <label>上游 Key</label
+                  <label data-i18n="t079">Upstream key</label
                   ><select id="play-key">
-                    <option value="auto">自动路由（匿名 / Tier 回退 / Key 轮询）</option>
+                    <option value="auto" data-i18n="t080">Auto route (anonymous / tier fallback / key rotation)</option>
                   </select>
-                  <div class="section-caption">
-                    选择具体 Key 后只测试该 Key：不会切换到其他 Key、其他 Tier
-                    或匿名通道，也不会改变 Key 冷却或代理健康状态。
-                  </div>
+                  <div class="section-caption" data-i18n="t081">Selecting a specific key tests only that key: no failover to other keys, tiers, or the anonymous lane, and no change to key cooldowns or proxy health.</div>
                 </div>
               </div>
               <div class="field">
-                <label>请求 JSON</label
+                <label data-i18n="t082">Request JSON</label
                 ><textarea id="play-request" class="json-editor" spellcheck="false"></textarea>
               </div>
               <div class="actions">
-                <button id="play-reset" type="button" class="ghost">重置模板</button
-                ><button id="play-run" class="primary">发送诊断请求</button>
+                <button id="play-reset" type="button" class="ghost" data-i18n="t083">Reset template</button
+                ><button id="play-run" class="primary" data-i18n="t084">Send diagnostic request</button>
               </div>
             </form>
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>诊断结果</h2>
-                  <div class="section-caption" id="play-state">尚未发送请求。</div>
+                  <h2 data-i18n="t085">Diagnostic result</h2>
+                  <div class="section-caption" id="play-state" data-i18n="t086">No request sent yet.</div>
                 </div>
               </div>
               <div id="play-facts" class="fact-grid"></div>
               <div class="code-card">
                 <div class="code-head">
                   <span>Raw protocol response</span
-                  ><button id="play-copy" type="button" class="copy">复制</button>
+                  ><button id="play-copy" type="button" class="copy" data-i18n="t087">Copy</button>
                 </div>
                 <pre id="play-output">{}</pre>
               </div>
@@ -382,10 +370,8 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>模型 Metadata</h2>
-                  <div class="section-caption">
-                    models.dev OpenCode 价格缓存状态；零成本或名称含 free 任一条件即可进入匿名通道。
-                  </div>
+                  <h2 data-i18n="t088">Model metadata</h2>
+                  <div class="section-caption" data-i18n="t089">models.dev OpenCode price-cache state; zero cost or a name containing free qualifies a model for the anonymous lane.</div>
                 </div>
               </div>
               <div id="metadata-facts" class="fact-grid"></div>
@@ -393,8 +379,8 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>最近 Playground</h2>
-                  <div class="section-caption">只保留当前管理进程内的最后一次追踪。</div>
+                  <h2 data-i18n="t090">Latest playground</h2>
+                  <div class="section-caption" data-i18n="t091">Only the last trace within the current management process is kept.</div>
                 </div>
               </div>
               <div id="last-playground" class="fact-grid"></div>
@@ -403,21 +389,21 @@
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>模型路由表</h2>
-                <div class="section-caption">显式协议、匿名资格来源与成本判断。</div>
+                <h2 data-i18n="t092">Model routing table</h2>
+                <div class="section-caption" data-i18n="t093">Explicit protocols, anonymous-eligibility sources, and cost verdicts.</div>
               </div>
-              <input id="diagnostic-model-search" placeholder="筛选模型" />
+              <input id="diagnostic-model-search" placeholder="Filter models" data-i18n-ph="t198" />
             </div>
             <div class="table-wrap">
               <table class="table">
                 <thead>
                   <tr>
-                    <th>模型</th>
-                    <th>原生协议</th>
-                    <th>路由</th>
-                    <th>匿名资格</th>
-                    <th>判断来源</th>
-                    <th>成本 input / output</th>
+                    <th data-i18n="t025">Model</th>
+                    <th data-i18n="t094">Native protocol</th>
+                    <th data-i18n="t095">Route</th>
+                    <th data-i18n="t096">Anonymous eligibility</th>
+                    <th data-i18n="t097">Verdict source</th>
+                    <th data-i18n="t098">Cost input / output</th>
                   </tr>
                 </thead>
                 <tbody id="diagnostic-models"></tbody>
@@ -427,25 +413,23 @@
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>请求路由</h2>
-                <div class="section-caption">
-                  每个请求最终实际使用的 Key 尾码或 anonymous；最多展示最近 100 条。
-                </div>
+                <h2 data-i18n="t099">Request routing</h2>
+                <div class="section-caption" data-i18n="t100">The key suffix or anonymous lane each request actually used; last 100 shown.</div>
               </div>
             </div>
             <div class="table-wrap">
               <table class="table">
                 <thead>
                   <tr>
-                    <th>时间</th>
+                    <th data-i18n="t101">Time</th>
                     <th>Request ID</th>
-                    <th>模型</th>
+                    <th data-i18n="t025">Model</th>
                     <th>Tier</th>
-                    <th>通道</th>
-                    <th>Key 尾码</th>
-                    <th>尝试</th>
-                    <th>状态</th>
-                    <th>耗时</th>
+                    <th data-i18n="t102">Channel</th>
+                    <th data-i18n="t043">Key suffix</th>
+                    <th data-i18n="t103">Attempts</th>
+                    <th data-i18n="t026">Status</th>
+                    <th data-i18n="t104">Duration</th>
                   </tr>
                 </thead>
                 <tbody id="upstream-requests"></tbody>
@@ -455,24 +439,22 @@
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>上游尝试</h2>
-                <div class="section-caption">
-                  Key 尾码、匿名通道与脱敏代理节点；最多展示最近 100 条。
-                </div>
+                <h2 data-i18n="t105">Upstream attempts</h2>
+                <div class="section-caption" data-i18n="t106">Key suffixes, anonymous lanes, and masked proxy nodes; last 100 shown.</div>
               </div>
             </div>
             <div class="table-wrap">
               <table class="table">
                 <thead>
                   <tr>
-                    <th>时间</th>
+                    <th data-i18n="t101">Time</th>
                     <th>Request ID</th>
-                    <th>模型</th>
-                    <th>通道</th>
-                    <th>Key 尾码</th>
-                    <th>代理节点</th>
-                    <th>状态</th>
-                    <th>耗时</th>
+                    <th data-i18n="t025">Model</th>
+                    <th data-i18n="t102">Channel</th>
+                    <th data-i18n="t043">Key suffix</th>
+                    <th data-i18n="t107">Proxy node</th>
+                    <th data-i18n="t026">Status</th>
+                    <th data-i18n="t104">Duration</th>
                   </tr>
                 </thead>
                 <tbody id="upstream-attempts"></tbody>
@@ -485,26 +467,26 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>服务与管理端</h2>
-                  <div class="section-caption">监听地址变更保存后需要重启。</div>
+                  <h2 data-i18n="t108">Service &amp; management</h2>
+                  <div class="section-caption" data-i18n="t109">Listen-address changes require a restart after saving.</div>
                 </div>
               </div>
               <div class="form-grid">
                 <div class="field">
-                  <label>认证 Key 首选 Tier</label
+                  <label data-i18n="t110">Preferred tier for auth keys</label
                   ><select id="c-prefer">
-                    <option value="go">Go（失败回退 Zen）</option>
-                    <option value="zen">Zen（失败回退 Go）</option>
+                    <option value="go" data-i18n="t111">Go (fall back to Zen)</option>
+                    <option value="zen" data-i18n="t112">Zen (fall back to Go)</option>
                   </select>
                 </div>
                 <div class="field"><label>API Listen</label><input id="c-listen" /></div>
                 <div class="field"><label>WebUI Listen</label><input id="c-web-listen" /></div>
                 <div class="field">
-                  <label>Session TTL（分钟）</label><input id="c-session" type="number" />
+                  <label data-i18n="t113">Session TTL (minutes)</label><input id="c-session" type="number" />
                 </div>
                 <div class="field full">
                   <label class="check-label"
-                    ><input id="c-web-enabled" type="checkbox" />启用 WebUI（修改需重启）</label
+                    ><input id="c-web-enabled" type="checkbox" / data-i18n="t114">Enable WebUI (restart required)</label
                   >
                 </div>
               </div>
@@ -512,45 +494,45 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>密钥与匿名通道</h2>
-                  <div class="section-caption">敏感值默认仅显示掩码；移除后保存才会生效。</div>
+                  <h2 data-i18n="t115">Secrets &amp; anonymous lane</h2>
+                  <div class="section-caption" data-i18n="t116">Secrets are masked by default; removals take effect after saving.</div>
                 </div>
-                <button id="reveal" type="button" class="ghost">二次验证查看</button>
+                <button id="reveal" type="button" class="ghost" data-i18n="t117">Re-authenticate to view</button>
               </div>
               <div class="form-grid">
                 <div class="field full">
                   <label class="check-label"
-                    ><input id="c-anonymous" type="checkbox" />启用 Zen 匿名通道</label
+                    ><input id="c-anonymous" type="checkbox" / data-i18n="t118">Enable the Zen anonymous lane</label
                   >
                 </div>
                 <div class="field full">
                   <label>Server Keys</label>
                   <div id="server_keys-chips" class="chips"></div>
-                  <textarea id="server_keys-new" placeholder="每行新增一个 key"></textarea>
+                  <textarea id="server_keys-new" placeholder="One new key per line" data-i18n-ph="t199"></textarea>
                 </div>
                 <div class="field">
                   <label>Zen Keys</label>
                   <div id="zen_keys-chips" class="chips"></div>
-                  <textarea id="zen_keys-new" placeholder="每行新增一个 key"></textarea>
+                  <textarea id="zen_keys-new" placeholder="One new key per line" data-i18n-ph="t199"></textarea>
                 </div>
                 <div class="field">
                   <label>Go Keys</label>
                   <div id="go_keys-chips" class="chips"></div>
-                  <textarea id="go_keys-new" placeholder="每行新增一个 key"></textarea>
+                  <textarea id="go_keys-new" placeholder="One new key per line" data-i18n-ph="t199"></textarea>
                 </div>
               </div>
             </div>
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>Proxy 节点</h2>
-                  <div class="section-caption">支持 direct、HTTP(S) 与 SOCKS URL。</div>
+                  <h2 data-i18n="t036">Proxy nodes</h2>
+                  <div class="section-caption" data-i18n="t119">Supports direct, HTTP(S), and SOCKS URLs.</div>
                 </div>
               </div>
               <div id="proxies-chips" class="chips"></div>
               <div class="form-grid">
                 <div class="field">
-                  <label>新增 Proxy（每行一个）</label
+                  <label data-i18n="t120">Add proxies (one per line)</label
                   ><textarea
                     id="proxies-new"
                     placeholder="direct&#10;http://user:pass@host:port"
@@ -564,31 +546,29 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>上游与协议路由</h2>
-                  <div class="section-caption">
-                    anonymous 会耗尽可用 Proxy；显式 protocol 映射优先于模型名称推断。
-                  </div>
+                  <h2 data-i18n="t121">Upstream &amp; protocol routing</h2>
+                  <div class="section-caption" data-i18n="t122">anonymous drains the available proxies; explicit protocol mappings win over name inference.</div>
                 </div>
               </div>
               <div class="form-grid">
                 <div class="field full">
                   <label class="check-label"
-                    ><input id="c-free-only" type="checkbox" />仅暴露免费模型（即使配置了 Zen / Go Key）</label
+                    ><input id="c-free-only" type="checkbox" / data-i18n="t123">Expose only free models (even with Zen / Go keys configured)</label
                   >
                 </div>
                 <div class="field"><label>Zen URL</label><input id="c-up-zen" /></div>
                 <div class="field"><label>Go URL</label><input id="c-up-go" /></div>
                 <div class="field">
-                  <label>每个 Key Tier 最大尝试次数</label><input id="c-attempts" type="number" />
+                  <label data-i18n="t124">Max attempts per key tier</label><input id="c-attempts" type="number" />
                 </div>
                 <div class="field">
-                  <label>请求超时（秒）</label><input id="c-timeout" type="number" />
+                  <label data-i18n="t125">Request timeout (s)</label><input id="c-timeout" type="number" />
                 </div>
                 <div class="field">
-                  <label>模型刷新（秒）</label><input id="c-refresh" type="number" />
+                  <label data-i18n="t126">Model refresh (s)</label><input id="c-refresh" type="number" />
                 </div>
                 <div class="field">
-                  <label>模型协议覆盖（JSON）</label
+                  <label data-i18n="t127">Model protocol overrides (JSON)</label
                   ><textarea id="c-protocols" spellcheck="false">{}</textarea>
                 </div>
               </div>
@@ -596,46 +576,41 @@
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>Thinking 强度</h2>
-                  <div class="section-caption">
-                    仅在客户端没有明确指定时生效；按模型覆盖默认值。选择“关闭”会移除未明确请求的
-                    reasoning。
-                  </div>
+                  <h2 data-i18n="t128">Thinking effort</h2>
+                  <div class="section-caption" data-i18n="t129">Applies only when the client does not state one explicitly; per-model values override the default. “Off” strips reasoning that was not explicitly requested.</div>
                 </div>
               </div>
               <div class="form-grid">
                 <div class="field">
-                  <label>默认强度</label
+                  <label data-i18n="t130">Default effort</label
                   ><select id="c-reasoning-effort">
-                    <option value="">跟随客户端</option>
-                    <option value="auto">auto（探测最高可用档）</option>
+                    <option value="" data-i18n="t131">Follow client</option>
+                    <option value="auto" data-i18n="t132">auto (highest probed level)</option>
                     <option value="minimal">minimal</option>
                     <option value="low">low</option>
                     <option value="medium">medium</option>
                     <option value="high">high</option>
                     <option value="xhigh">xhigh</option>
                     <option value="max">max</option>
-                    <option value="none">关闭</option>
+                    <option value="none" data-i18n="t133">Off</option>
                   </select>
                 </div>
                 <div class="field full">
-                  <label>按模型覆盖（JSON）</label
+                  <label data-i18n="t134">Per-model overrides (JSON)</label
                   ><textarea
                     id="c-reasoning-by-model"
                     spellcheck="false"
                     placeholder='{"model-id":"high"}'
                   ></textarea>
-                  <div class="section-caption">
-                    值可为 minimal、low、medium、high、xhigh、max 或 none；空对象表示不覆盖。
-                  </div>
+                  <div class="section-caption" data-i18n="t135">Values: minimal, low, medium, high, xhigh, max, or none; an empty object means no override.</div>
                 </div>
               </div>
             </div>
             <div class="section">
               <div class="section-head">
                 <div>
-                  <h2>性能与日志</h2>
-                  <div class="section-caption">热重载会保留进程内监控累计。</div>
+                  <h2 data-i18n="t136">Performance &amp; logging</h2>
+                  <div class="section-caption" data-i18n="t137">Hot reload keeps in-process monitoring totals.</div>
                 </div>
               </div>
               <div class="form-grid">
@@ -649,29 +624,29 @@
                   <label>Max Conns / Host</label><input id="c-max-host" type="number" />
                 </div>
                 <div class="field">
-                  <label>Idle Timeout（秒）</label><input id="c-idle-timeout" type="number" />
+                  <label data-i18n="t138">Idle timeout (s)</label><input id="c-idle-timeout" type="number" />
                 </div>
                 <div class="field">
-                  <label>Connect Timeout（秒）</label><input id="c-connect" type="number" />
+                  <label data-i18n="t139">Connect timeout (s)</label><input id="c-connect" type="number" />
                 </div>
                 <div class="field">
-                  <label>Failure Cooldown（秒）</label><input id="c-cooldown" type="number" />
+                  <label data-i18n="t140">Failure cooldown (s)</label><input id="c-cooldown" type="number" />
                 </div>
                 <div class="field">
-                  <label>Attempt Timeout（秒）</label
+                  <label data-i18n="t141">Attempt timeout (s)</label
                   ><input
                     id="c-attempt-timeout"
                     type="number"
                     min="0"
-                    placeholder="0 = 跟随请求超时"
+                    placeholder="0 = follow request timeout" data-i18n-ph="t200"
                   />
                 </div>
                 <div class="field">
-                  <label>首个 SSE 事件超时（秒，0 关闭）</label>
+                  <label data-i18n="t142">First SSE event timeout (s, 0 disables)</label>
                   <input id="c-first-event-timeout" type="number" min="0" max="86400" />
                 </div>
                 <div class="field">
-                  <label>日志级别</label
+                  <label data-i18n="t143">Log level</label
                   ><select id="c-level">
                     <option>debug</option>
                     <option>info</option>
@@ -680,20 +655,20 @@
                   </select>
                 </div>
                 <div class="field">
-                  <label>日志 Ring Size</label><input id="c-ring" type="number" />
+                  <label data-i18n="t144">Log ring size</label><input id="c-ring" type="number" />
                 </div>
                 <div class="field full">
                   <label class="check-label"
                     ><input
                       id="c-dump-bodies"
                       type="checkbox"
-                    />转储出站请求体（已脱敏，仅用于排查重试与转换问题）</label
+                    / data-i18n="t145">Dump outbound request bodies (redacted; for retry/conversion debugging only)</label
                   >
                 </div>
               </div>
               <div class="actions">
-                <button id="reload-config" type="button" class="ghost">从磁盘重载</button
-                ><button class="primary">验证、保存并应用</button>
+                <button id="reload-config" type="button" class="ghost" data-i18n="t146">Reload from disk</button
+                ><button class="primary" data-i18n="t147">Validate, save &amp; apply</button>
               </div>
             </div>
           </form>
@@ -701,15 +676,15 @@
         <section id="page-logs" class="page hidden">
           <div class="filters">
             <select id="log-level">
-              <option value="">全部级别</option>
+              <option value="" data-i18n="t148">All levels</option>
               <option>debug</option>
               <option>info</option>
               <option>warn</option>
               <option>error</option></select
-            ><input id="log-component" placeholder="模块" /><input
+            ><input id="log-component" placeholder="Module" data-i18n-ph="t201" /><input
               id="log-search"
-              placeholder="搜索事件、Request ID、模型"
-            /><button id="log-pause" class="ghost">暂停</button>
+              placeholder="Search events, request IDs, models" data-i18n-ph="t202"
+            /><button id="log-pause" class="ghost" data-i18n="t149">Pause</button>
           </div>
           <div id="log-list" class="logs"></div>
         </section>
@@ -717,38 +692,31 @@
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>OpenCode Go 套餐额度</h2>
-                <div class="section-caption">
-                  来自 OpenCode 的实时查询，缓存 60 秒。所有模型共享套餐窗口，百分比由上游取整。
-                </div>
+                <h2 data-i18n="t150">OpenCode Go plan quotas</h2>
+                <div class="section-caption" data-i18n="t151">Live data from OpenCode, cached for 60s. All models share the plan window; percentages are rounded upstream.</div>
               </div>
-              <button id="quota-refresh" class="ghost">刷新额度</button>
+              <button id="quota-refresh" class="ghost" data-i18n="t152">Refresh quotas</button>
             </div>
             <div class="field">
               <label for="quota-account">Go Key</label
               ><select id="quota-account">
-                <option>读取中…</option>
+                <option data-i18n="t153">Loading…</option>
               </select>
             </div>
-            <div id="quota-status" class="quota-status" role="status" aria-live="polite">
-              进入页面后读取额度。
-            </div>
+            <div id="quota-status" class="quota-status" role="status" aria-live="polite" data-i18n="t154">Quotas load when you open this page.</div>
             <div id="quota-cards" class="quota-grid"></div>
             <div id="quota-updated" class="section-caption"></div>
           </div>
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>可用模型 <span id="quota-model-count" class="section-caption"></span></h2>
-                <div class="section-caption">
-                  模型名称可直接填入
-                  OPENAI_MODEL。额度列对应上方选定套餐，不代表每个模型拥有独立额度。
-                </div>
+                <h2><span data-i18n="t155">Available models</span> <span id="quota-model-count" class="section-caption"></span></h2>
+                <div class="section-caption" data-i18n="t156">Model names can be pasted straight into OPENAI_MODEL. Quota columns follow the plan selected above; models do not have separate quotas.</div>
               </div>
               <input
                 id="quota-model-search"
-                aria-label="搜索模型"
-                placeholder="搜索模型名称…"
+                aria-label="Search models" data-i18n-aria="t203"
+                placeholder="Search model names…" data-i18n-ph="t204"
                 type="search"
               />
             </div>
@@ -757,12 +725,12 @@
               <table class="table">
                 <thead>
                   <tr>
-                    <th>模型名称</th>
-                    <th>上游协议</th>
-                    <th>5 小时剩余 · 共享</th>
-                    <th>本周剩余 · 共享</th>
-                    <th>本月剩余 · 共享</th>
-                    <th>操作</th>
+                    <th data-i18n="t157">Model name</th>
+                    <th data-i18n="t158">Upstream protocol</th>
+                    <th data-i18n="t159">5h left · shared</th>
+                    <th data-i18n="t160">Week left · shared</th>
+                    <th data-i18n="t161">Month left · shared</th>
+                    <th data-i18n="t032">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="quota-models"></tbody>
@@ -774,49 +742,40 @@
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>SOTA / 甜点模型轮转</h2>
-                <div class="section-caption">
-                  成功后继续使用当前模型。额度不足或错误时按顺序切换，仅使用 OpenCode Go。
-                </div>
+                <h2 data-i18n="t162">SOTA / sweet-model rotation</h2>
+                <div class="section-caption" data-i18n="t163">Stick with the working model after success. On quota shortage or errors, rotate in order; OpenCode Go only.</div>
               </div>
-              <button id="rotation-refresh" class="ghost">刷新状态</button>
+              <button id="rotation-refresh" class="ghost" data-i18n="t023">Refresh status</button>
             </div>
-            <p class="section-caption">
-              沿用现有 Base URL 和 API Key，将 OPENAI_MODEL 设为下方别名。每个模型普通错误最多尝试 3
-              次，一次请求最多重试 3 个模型；额度不足直接跳过。
-            </p>
-            <p class="section-caption">
-              输出开始后，本次回答固定使用同一模型。中途故障会结束本次输出，下一次请求才换模型。模型共享套餐额度，切换不保证解决套餐耗尽。
-            </p>
+            <p class="section-caption" data-i18n="t164">Reuse your existing base URL and API key; set OPENAI_MODEL to an alias below. Up to 3 attempts per model on ordinary errors and up to 3 models per request; quota shortages are skipped outright.</p>
+            <p class="section-caption" data-i18n="t165">Once output starts, the whole answer stays on one model. A mid-stream failure ends that output; the next request rotates. Models share the plan quota, so switching does not guarantee relief when the plan is exhausted.</p>
             <div id="rotation-status" role="status" class="section-caption"></div>
           </div>
           <form id="rotation-form">
             <div id="rotation-groups"></div>
             <div class="section">
               <div class="field">
-                <label for="rotation-timeout">首个有效输出等待上限（秒）</label
+                <label for="rotation-timeout" data-i18n="t166">Max wait for first valid output (s)</label
                 ><input id="rotation-timeout" type="number" min="1" max="300" value="30" required />
               </div>
               <div class="actions">
-                <button id="rotation-save" class="primary">保存别名与顺序</button>
+                <button id="rotation-save" class="primary" data-i18n="t167">Save aliases &amp; order</button>
               </div>
-              <p class="section-caption">
-                保存立即生效；调整顺序不会打断正在输出的回答。手动选择当前模型会立即生效，并解除该模型的临时暂停。
-              </p>
+              <p class="section-caption" data-i18n="t168">Saving takes effect immediately; reordering never interrupts an in-flight answer. Manually picking the current model applies at once and clears that model's temporary pause.</p>
             </div>
           </form>
           <div class="section">
-            <div class="section-head"><h2>最近请求尝试</h2></div>
+            <div class="section-head"><h2 data-i18n="t169">Recent request attempts</h2></div>
             <div class="table-wrap">
               <table class="table">
                 <thead>
                   <tr>
-                    <th>时间</th>
-                    <th>请求</th>
-                    <th>别名</th>
-                    <th>实际模型</th>
-                    <th>尝试</th>
-                    <th>结果</th>
+                    <th data-i18n="t101">Time</th>
+                    <th data-i18n="t170">Request</th>
+                    <th data-i18n="t171">Alias</th>
+                    <th data-i18n="t172">Actual model</th>
+                    <th data-i18n="t103">Attempts</th>
+                    <th data-i18n="t173">Result</th>
                   </tr>
                 </thead>
                 <tbody id="rotation-attempts"></tbody>
@@ -828,103 +787,95 @@
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>为调用方创建 API Key</h2>
-                <div class="section-caption">
-                  用于访问本机 B 服务。每个应用可使用独立密钥；创建、启停和删除立即生效。
-                </div>
+                <h2 data-i18n="t174">Create an API key for a caller</h2>
+                <div class="section-caption" data-i18n="t175">For accessing local service B. Each app can have its own key; create, enable/disable, and delete take effect immediately.</div>
               </div>
             </div>
             <form id="api-key-form">
               <div class="form-grid">
                 <div class="field">
-                  <label for="api-key-name">名称</label
+                  <label for="api-key-name" data-i18n="t176">Name</label
                   ><input
                     id="api-key-name"
-                    placeholder="例如：我的笔记助手"
+                    placeholder="e.g. my notes assistant" data-i18n-ph="t205"
                     maxlength="80"
                     required
                   />
                 </div>
                 <div class="field">
-                  <label for="api-key-value">自定义 Key（可选）</label
+                  <label for="api-key-value" data-i18n="t177">Custom key (optional)</label
                   ><input
                     id="api-key-value"
                     type="password"
                     autocomplete="new-password"
                     minlength="16"
                     maxlength="256"
-                    placeholder="留空自动生成；自定义需 16–256 位"
+                    placeholder="Blank auto-generates; custom keys need 16–256 chars" data-i18n-ph="t206"
                   />
                 </div>
               </div>
               <div class="actions">
-                <button id="api-key-create" class="primary">创建 API Key</button>
+                <button id="api-key-create" class="primary" data-i18n="t178">Create API key</button>
               </div>
             </form>
           </div>
           <div id="api-key-created" class="section hidden" role="status">
             <div class="section-head">
               <div>
-                <h2>密钥已创建</h2>
-                <div class="section-caption">
-                  完整密钥仅在创建后展示，请现在保存到调用方的环境变量。
-                </div>
+                <h2 data-i18n="t179">Key created</h2>
+                <div class="section-caption" data-i18n="t180">The full key is shown only once, right after creation — save it to the caller's environment now.</div>
               </div>
-              <button id="api-key-dismiss" class="ghost">已保存，关闭</button>
+              <button id="api-key-dismiss" class="ghost" data-i18n="t181">Saved, close</button>
             </div>
             <pre id="api-key-env" class="key-env"></pre>
             <div class="actions">
-              <button id="api-key-copy" class="ghost">复制 Key</button
-              ><button id="api-key-copy-env" class="primary">复制环境变量</button>
+              <button id="api-key-copy" class="ghost" data-i18n="t182">Copy key</button
+              ><button id="api-key-copy-env" class="primary" data-i18n="t183">Copy env vars</button>
             </div>
           </div>
           <div class="section">
             <div class="section-head">
               <div>
-                <h2>访问密钥 <span id="api-key-count" class="section-caption"></span></h2>
-                <div class="section-caption">
-                  此处管理服务 B 的访问权限。OpenCode Go 的上游密钥仍在配置中心管理。
-                </div>
+                <h2><span data-i18n="t184">Access keys</span> <span id="api-key-count" class="section-caption"></span></h2>
+                <div class="section-caption" data-i18n="t185">Service B access is managed here. Upstream OpenCode Go keys still live in Configuration.</div>
               </div>
-              <button id="api-key-refresh" class="ghost">刷新列表</button>
+              <button id="api-key-refresh" class="ghost" data-i18n="t186">Refresh list</button>
             </div>
             <div id="api-key-status" role="status" aria-live="polite" class="section-caption"></div>
             <div class="table-wrap">
               <table class="table">
                 <thead>
                   <tr>
-                    <th>名称</th>
-                    <th>密钥尾码</th>
-                    <th>状态</th>
-                    <th>用量（近 1 小时 / 累计）</th>
-                    <th>创建时间</th>
-                    <th>操作</th>
+                    <th data-i18n="t176">Name</th>
+                    <th data-i18n="t187">Key suffix</th>
+                    <th data-i18n="t026">Status</th>
+                    <th data-i18n="t188">Usage (last hour / lifetime)</th>
+                    <th data-i18n="t189">Created</th>
+                    <th data-i18n="t032">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="api-key-list"></tbody>
               </table>
             </div>
-            <p class="section-caption">
-              停用和删除会使对应应用的新请求返回 401。至少保留一个启用的 Key。
-            </p>
+            <p class="section-caption" data-i18n="t190">Disabling or deleting a key makes new requests from that app return 401. Keep at least one enabled key.</p>
           </div>
         </section>
         <section id="page-account" class="page hidden">
           <form id="account-form" class="section">
             <div class="section-head">
               <div>
-                <h2>更新管理账号</h2>
-                <div class="section-caption">成功后撤销全部 Session，并要求重新登录。</div>
+                <h2 data-i18n="t191">Update admin account</h2>
+                <div class="section-caption" data-i18n="t192">Success revokes all sessions and requires signing in again.</div>
               </div>
             </div>
-            <div class="field"><label>新账号（留空保持）</label><input id="a-user" /></div>
+            <div class="field"><label data-i18n="t193">New username (blank keeps current)</label><input id="a-user" /></div>
             <div class="field">
-              <label>当前密码</label><input id="a-current" type="password" required />
+              <label data-i18n="t194">Current password</label><input id="a-current" type="password" required />
             </div>
             <div class="field">
-              <label>新密码（留空保持，至少 10 字符）</label><input id="a-new" type="password" />
+              <label data-i18n="t195">New password (blank keeps current, min 10 chars)</label><input id="a-new" type="password" />
             </div>
-            <div class="actions"><button class="primary">更新并重新登录</button></div>
+            <div class="actions"><button class="primary" data-i18n="t196">Update &amp; sign in again</button></div>
           </form>
         </section>
       </main>
@@ -934,14 +885,15 @@
         <div class="section-head">
           <div>
             <div class="eyebrow">Sensitive values</div>
-            <h2>敏感配置</h2>
+            <h2 data-i18n="t197">Sensitive values</h2>
           </div>
-          <button id="modal-close" class="ghost">关闭</button>
+          <button id="modal-close" class="ghost" data-i18n="t133">Off</button>
         </div>
         <pre id="modal-content"></pre>
       </div>
     </div>
     <div id="toast" class="toast hidden"></div>
+    <script src="/i18n.js"></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

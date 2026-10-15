@@ -923,3 +923,13 @@ textarea {
   max-width: 270px;
   overflow-wrap: anywhere;
 }
+
+/* Language switcher (i18n): compact selects in toolbar and login card. */
+#lang-switch {
+  width: auto;
+  padding: 9px 10px;
+  font-weight: 750;
+}
+.lang-field select {
+  width: 100%;
+}

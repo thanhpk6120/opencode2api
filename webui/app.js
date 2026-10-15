@@ -11,21 +11,30 @@ let csrf = "",
   monitorTimer = null,
   logRenderPending = false,
   toastTimer = null;
-const pages = {
-  availability: ["13", "免费模型可用性", "每小时探测，手动控制的模型不受影响。"],
-  rotation: ["12", "模型轮转", "共享当前模型、故障切换与尝试记录。"],
-  overview: ["01", "运行桌面", "最近一小时、进程累计与当前资源状态。"],
-  guide: ["02", "首次运行", "用六个检查点完成从配置到首个请求。"],
-  access: ["03", "接入手册", "Chat、Responses、Anthropic 与 SDK 示例。"],
-  usage: ["04", "Token 用量", "覆盖率、每分钟趋势、模型排行与 Tier 分布。"],
-  playground: ["05", "Playground", "三种入口协议共用真实 Gateway 路由与诊断。"],
-  diagnostics: ["06", "路由诊断", "Metadata、模型资格与每一次上游尝试。"],
-  config: ["07", "配置中心", "验证后原子保存，并热应用可变字段。"],
-  logs: ["08", "事件日志", "来自进程内 Ring Buffer 的结构化 SSE。"],
-  account: ["09", "账号安全", "更新后撤销全部管理 Session。"],
-  "model-quotas": ["10", "模型与额度", "可用模型、共享套餐剩余额度与重置时间。"],
-  "api-keys": ["11", "API Key 管理", "给每个调用方独立的访问密钥。"],
-};
+function pageMeta() {
+  return {
+    availability: ["13", t("t018"), t("t207")],
+    rotation: ["12", t("t017"), t("t208")],
+    overview: ["01", t("t007"), t("t019")],
+    guide: ["02", t("t008"), t("t209")],
+    access: ["03", t("t009"), t("t210")],
+    usage: ["04", t("t010"), t("t211")],
+    playground: ["05", "Playground", t("t212")],
+    diagnostics: ["06", t("t011"), t("t213")],
+    config: ["07", t("t012"), t("t214")],
+    logs: ["08", t("t013"), t("t215")],
+    account: ["09", t("t014"), t("t216")],
+    "model-quotas": ["10", t("t015"), t("t217")],
+    "api-keys": ["11", t("t016"), t("t218")],
+  };
+}
+const pages = new Proxy(
+  {},
+  {
+    get: (_, prop) => pageMeta()[prop],
+    has: (_, prop) => prop in pageMeta(),
+  },
+);
 async function api(path, options = {}) {
   options.headers = { ...(options.headers || {}), Accept: "application/json" };
   if (options.body) options.headers["Content-Type"] = "application/json";
@@ -34,7 +43,7 @@ async function api(path, options = {}) {
   const response = await fetch(path, options);
   if (response.status === 401) {
     showLogin();
-    throw new Error("登录已失效");
+    throw new Error(t("t219"));
   }
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
@@ -167,7 +176,7 @@ function fillConfig(value) {
   ["server_keys", "zen_keys", "go_keys", "proxies"].forEach(renderChips);
   const notice = $("#restart-notice");
   if (value.restart_required_fields?.length) {
-    notice.textContent = `已保存但尚未生效：${value.restart_required_fields.join(", ")}。当前 API ${value.effective.listen}、WebUI ${value.effective.webui_listen}。请重启进程。`;
+    notice.textContent = t("t220", value.restart_required_fields.join(", "), value.effective.listen, value.effective.webui_listen);
     notice.classList.remove("hidden");
   } else notice.classList.add("hidden");
 }
@@ -182,7 +191,7 @@ function renderChips(name) {
     chip.dataset.id = item.id;
     text.textContent = item.display;
     remove.type = "button";
-    remove.title = "移除";
+    remove.title = t("t221");
     remove.textContent = "×";
     remove.onclick = () => chip.remove();
     chip.append(text, remove);
@@ -253,11 +262,11 @@ $("#config-form").addEventListener("submit", async (event) => {
     await loadDebugModels();
     toast(
       result.result.restart_required
-        ? `已应用；${result.result.restart_fields.join(", ")} 需重启`
-        : "配置已保存并立即应用",
+        ? t("t222", result.result.restart_fields.join(", "))
+        : t("t223"),
     );
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   }
 });
 $("#reload-config").onclick = async () => {
@@ -265,13 +274,13 @@ $("#reload-config").onclick = async () => {
     const result = await api("/api/config/reload", { method: "POST", body: "{}" });
     await loadConfig();
     await loadDebugModels();
-    toast(result.restart_required ? "磁盘配置已重载，监听字段需重启" : "磁盘配置已重载");
+    toast(result.restart_required ? t("t224") : t("t225"));
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   }
 };
 $("#reveal").onclick = async () => {
-  const password = prompt("请再次输入管理密码");
+  const password = prompt(t("t226"));
   if (password === null) return;
   try {
     const values = await api("/api/config/reveal", {
@@ -281,7 +290,7 @@ $("#reveal").onclick = async () => {
     $("#modal-content").textContent = JSON.stringify(values, null, 2);
     $("#modal").classList.remove("hidden");
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   }
 };
 $("#modal-close").onclick = () => {
@@ -299,10 +308,10 @@ $("#account-form").addEventListener("submit", async (event) => {
         new_password: $("#a-new").value,
       }),
     });
-    toast("账号已更新，请重新登录");
+    toast(t("t227"));
     setTimeout(showLogin, 800);
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   }
 });
 function appendCell(row, value, className = "") {
@@ -311,7 +320,7 @@ function appendCell(row, value, className = "") {
   if (className) cell.className = className;
   row.appendChild(cell);
 }
-function emptyRow(host, columns, message = "暂无数据") {
+function emptyRow(host, columns, message = t("t228")) {
   const row = document.createElement("tr"),
     cell = document.createElement("td");
   cell.colSpan = columns;
@@ -326,10 +335,10 @@ function renderResources(resources) {
   (resources.proxies || []).forEach((proxy) => {
     const row = document.createElement("tr");
     appendCell(row, proxy.address);
-    appendCell(row, proxy.healthy ? "正常" : "不可用", `status ${proxy.healthy ? "ok" : "bad"}`);
+    appendCell(row, proxy.healthy ? t("t229") : t("t230"), `status ${proxy.healthy ? "ok" : "bad"}`);
     appendCell(
       row,
-      `Z ${proxy.zen_keys} · G ${proxy.go_keys} · A ${proxy.anonymous ? "开" : "关"}`,
+      t("t231", proxy.zen_keys, proxy.go_keys, proxy.anonymous ? t("t422") : t("t423")),
     );
     proxies.appendChild(row);
   });
@@ -340,7 +349,7 @@ function renderResources(resources) {
     const row = document.createElement("tr");
     appendCell(row, "anonymous");
     appendCell(row, "zen");
-    appendCell(row, "已启用", "status ok");
+    appendCell(row, t("t232"), "status ok");
     keys.appendChild(row);
   }
   (resources.keys || []).forEach((key) => {
@@ -349,7 +358,7 @@ function renderResources(resources) {
     appendCell(row, key.tier);
     appendCell(
       row,
-      key.cooldown_until ? "冷却中" : "可用",
+      key.cooldown_until ? t("t233") : t("t234"),
       `status ${key.cooldown_until ? "warn" : "ok"}`,
     );
     keys.appendChild(row);
@@ -360,9 +369,9 @@ function renderBreakdowns(metrics) {
   const host = $("#breakdowns");
   host.replaceChildren();
   [
-    ["端点", metrics.endpoints],
-    ["状态码", metrics.statuses],
-    ["模型", metrics.models],
+    [t("t235"), metrics.endpoints],
+    [t("t236"), metrics.statuses],
+    [t("t025"), metrics.models],
     ["Tier", metrics.tiers],
   ].forEach(([title, data]) => {
     const block = document.createElement("div"),
@@ -380,7 +389,7 @@ function renderBreakdowns(metrics) {
         appendCell(row, value);
         body.appendChild(row);
       });
-    if (!body.children.length) emptyRow(body, 2, "暂无请求");
+    if (!body.children.length) emptyRow(body, 2, t("t237"));
     table.appendChild(body);
     block.append(heading, table);
     host.appendChild(block);
@@ -391,23 +400,23 @@ function renderGuide() {
   const resources = monitorData.resources,
     models = resources.models || {},
     modelDescription = models.stale
-      ? "目录来自" + (models.cache_source || "磁盘") + "快取，等待背景刷新。"
-      : "上游目录已完成首次刷新且有可暴露模型。";
+      ? t("t238") + (models.cache_source || t("t239")) + t("t240")
+      : t("t241");
   const checks = [
-    ["登录管理端", "当前 Session 已通过服务端验证。", true],
-    ["配置本地 Key", "客户端使用 Server Key 访问 Gateway。", (config.server_keys || []).length > 0],
+    [t("t242"), t("t243"), true],
+    [t("t244"), t("t245"), (config.server_keys || []).length > 0],
     [
-      "选择上游通道",
-      "至少有 Zen / Go Key，或启用匿名通道。",
+      t("t246"),
+      t("t247"),
       (config.zen_keys || []).length + (config.go_keys || []).length > 0 || config.anonymous,
     ],
     [
-      "检查 Proxy",
-      "至少一个代理节点健康。",
+      t("t248"),
+      t("t249"),
       (resources.proxies || []).some((proxy) => proxy.healthy),
     ],
-    ["等待模型目录", modelDescription, models.exposed > 0 && !!models.updated_at],
-    ["复制接入示例", "进入接入手册，替换模型与 YOUR_API_KEY。", true],
+    [t("t250"), modelDescription, models.exposed > 0 && !!models.updated_at],
+    [t("t251"), t("t252"), true],
   ];
   const host = $("#guide-steps");
   host.replaceChildren();
@@ -420,12 +429,12 @@ function renderGuide() {
     heading.textContent = title;
     copy.textContent = description;
     state.className = `step-state ${done ? "ok" : "warn"}`;
-    state.textContent = done ? "✓ 已就绪" : "○ 待处理";
+    state.textContent = done ? t("t253") : t("t254");
     node.append(heading, copy, state);
     host.appendChild(node);
   });
 }
-const formatTokens = (value) => Number(value || 0).toLocaleString();
+const formatTokens = (value) => Number(value || 0).toLocaleString(LOC());
 function renderUsage() {
   if (!monitorData) return;
   const usage = monitorData.usage?.last_hour || {},
@@ -442,7 +451,7 @@ function renderUsage() {
     const bar = document.createElement("div");
     bar.className = "trend-bar";
     bar.style.height = `${Math.max(2, Math.round(((point.total_tokens || 0) / maximum) * 100))}%`;
-    bar.title = `${new Date(point.minute).toLocaleTimeString()} · input ${formatTokens(point.input_tokens)} · output ${formatTokens(point.output_tokens)} · total ${formatTokens(point.total_tokens)}`;
+    bar.title = `${new Date(point.minute).toLocaleTimeString(LOC())} · input ${formatTokens(point.input_tokens)} · output ${formatTokens(point.output_tokens)} · total ${formatTokens(point.total_tokens)}`;
     trend.appendChild(bar);
   });
   const models = $("#usage-models");
@@ -458,7 +467,7 @@ function renderUsage() {
       appendCell(row, formatTokens(value.total_tokens));
       models.appendChild(row);
     });
-  if (!models.children.length) emptyRow(models, 4, "尚无 Token 用量");
+  if (!models.children.length) emptyRow(models, 4, t("t255"));
   const tiers = $("#usage-tiers"),
     tierEntries = Object.entries(usage.tiers || {}).sort(
       (a, b) => (b[1].total_tokens || 0) - (a[1].total_tokens || 0),
@@ -485,7 +494,7 @@ function renderUsage() {
   if (!tierEntries.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "尚无 Tier 用量";
+    empty.textContent = t("t256");
     tiers.appendChild(empty);
   }
 }
@@ -511,7 +520,7 @@ function renderPlayKeys() {
   select.replaceChildren();
   const auto = document.createElement("option");
   auto.value = "auto";
-  auto.textContent = "自动路由（匿名 / Tier 回退 / Key 轮询）";
+  auto.textContent = t("t080");
   select.appendChild(auto);
   const keys = debugData?.keys || {};
   [
@@ -526,7 +535,7 @@ function renderPlayKeys() {
       const option = document.createElement("option");
       option.value = `${tier}:${item.id}`;
       const cooling = item.cooldown_until
-        ? ` · 冷却至 ${new Date(item.cooldown_until).toLocaleTimeString()}`
+        ? t("t257", new Date(item.cooldown_until).toLocaleTimeString(LOC()))
         : "";
       option.textContent = `${tier.toUpperCase()} · ${item.display} · ${item.id}${cooling}`;
       group.appendChild(option);
@@ -556,20 +565,20 @@ async function loadDebugModels() {
     if (!$("#play-request").value.trim()) resetPlayTemplate();
     renderDiagnostics();
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   }
 }
 function playgroundTemplate() {
   const protocol = $("#play-protocol").value,
     model = $("#play-model").value || "YOUR_MODEL";
-  if (protocol === "responses") return { model, input: "用一句话说明这个模型的能力。" };
+  if (protocol === "responses") return { model, input: t("t258") };
   if (protocol === "anthropic")
     return {
       model,
       max_tokens: 512,
-      messages: [{ role: "user", content: "用一句话说明这个模型的能力。" }],
+      messages: [{ role: "user", content: t("t258") }],
     };
-  return { model, messages: [{ role: "user", content: "用一句话说明这个模型的能力。" }] };
+  return { model, messages: [{ role: "user", content: t("t258") }] };
 }
 function resetPlayTemplate() {
   $("#play-request").value = JSON.stringify(playgroundTemplate(), null, 2);
@@ -589,41 +598,41 @@ function displayPlayground(result) {
   lastPlayground = result;
   const keyTest = result.key_test
     ? {
-        usable: "Key 可用",
-        rejected: "Key 被拒绝",
-        rate_limited: "Key 已被接受但受到限流",
-        upstream_error: "上游异常，无法判定 Key",
-        transport_error: "网络或代理异常，无法判定 Key",
-        unavailable: "Key 或运行时不可用",
-        request_error: "请求未成功",
+        usable: t("t259"),
+        rejected: t("t260"),
+        rate_limited: t("t261"),
+        upstream_error: t("t262"),
+        transport_error: t("t263"),
+        unavailable: t("t264"),
+        request_error: t("t265"),
       }[result.key_test] || result.key_test
     : "";
   $("#play-state").textContent = result.ok
-    ? `请求成功 · HTTP ${result.http_status}`
-    : `请求失败 · HTTP ${result.http_status}`;
+    ? t("t266", result.http_status)
+    : t("t267", result.http_status);
   $("#play-state").className = `section-caption ${result.ok ? "ok" : "bad"}`;
   const route = result.route || {},
     eligibility = route.anonymous_eligibility || {},
     selected = result.selected_key,
     routeLabel = route.tier
       ? `${route.tier} / ${route.anonymous ? "anonymous" : route.key_id || "key"}`
-      : "未路由";
+      : t("t268");
   renderFacts("#play-facts", [
-    ["HTTP 状态", result.http_status, result.ok ? "ok" : "bad"],
-    ["耗时", `${result.duration_ms} ms`],
+    [t("t269"), result.http_status, result.ok ? "ok" : "bad"],
+    [t("t104"), `${result.duration_ms} ms`],
     ["Request ID", result.request_id || "—"],
-    ["测试模式", selected ? `指定 ${selected.tier.toUpperCase()} Key` : "自动路由"],
-    ["测试 Key", selected ? `${selected.display} · ${selected.id}` : "—"],
+    [t("t270"), selected ? t("t271", selected.tier.toUpperCase()) : t("t272")],
+    [t("t273"), selected ? `${selected.display} · ${selected.id}` : "—"],
     [
-      "Key 判断",
-      keyTest || "自动路由未单独判定",
+      t("t274"),
+      keyTest || t("t275"),
       result.key_test === "usable" ? "ok" : result.key_test ? "bad" : "",
     ],
-    ["实际路由", routeLabel],
-    ["原生协议", route.native_protocol || "—"],
+    [t("t276"), routeLabel],
+    [t("t094"), route.native_protocol || "—"],
     [
-      "匿名判断",
-      `${eligibility.allowed ? "允许" : "拒绝"} · ${eligibility.source || "—"}`,
+      t("t277"),
+      t("t278", eligibility.allowed ? t("t302") : t("t303"), eligibility.source || "—"),
       eligibility.allowed ? "ok" : "warn",
     ],
   ]);
@@ -636,7 +645,7 @@ $("#play-form").addEventListener("submit", async (event) => {
   try {
     request = JSON.parse($("#play-request").value);
   } catch (error) {
-    toast(`请求 JSON 无效：${error.message}`, true);
+    toast(t("t279", error.message), true);
     return;
   }
   const keyValue = $("#play-key").value,
@@ -650,7 +659,7 @@ $("#play-form").addEventListener("submit", async (event) => {
           };
   $("#play-run").disabled = true;
   $("#play-state").textContent =
-    key.mode === "selected" ? "指定 Key 测试进行中…" : "Gateway 请求进行中…";
+    key.mode === "selected" ? t("t280") : t("t281");
   try {
     const result = await api("/api/debug/inference", {
       method: "POST",
@@ -658,8 +667,8 @@ $("#play-form").addEventListener("submit", async (event) => {
     });
     displayPlayground(result);
   } catch (error) {
-    toast(error.message, true);
-    $("#play-state").textContent = "诊断入口请求失败";
+    toast(tx(error.message), true);
+    $("#play-state").textContent = t("t282");
   } finally {
     $("#play-run").disabled = false;
   }
@@ -667,9 +676,9 @@ $("#play-form").addEventListener("submit", async (event) => {
 $("#play-copy").onclick = async () => {
   try {
     await navigator.clipboard.writeText($("#play-output").textContent);
-    toast("原始响应已复制");
+    toast(t("t283"));
   } catch (_) {
-    toast("浏览器不允许剪贴板访问", true);
+    toast(t("t284"), true);
   }
 };
 function renderDiagnostics() {
@@ -677,30 +686,30 @@ function renderDiagnostics() {
   const metadata = debugData?.metadata || monitorData?.resources?.metadata || {},
     last = lastPlayground || debugData?.last_inference;
   renderFacts("#metadata-facts", [
-    ["就绪", metadata.ready ? "是" : "否", metadata.ready ? "ok" : "warn"],
-    ["模型数", formatTokens(metadata.models)],
-    ["更新时间", metadata.updated_at ? new Date(metadata.updated_at).toLocaleString() : "尚未更新"],
-    ["是否过期", metadata.stale ? "是" : "否", metadata.stale ? "warn" : "ok"],
-    ["下次刷新", metadata.next_refresh ? new Date(metadata.next_refresh).toLocaleString() : "—"],
-    ["最近错误", metadata.last_error || "无", metadata.last_error ? "bad" : "ok"],
+    [t("t285"), metadata.ready ? t("t286") : t("t287"), metadata.ready ? "ok" : "warn"],
+    [t("t288"), formatTokens(metadata.models)],
+    [t("t289"), metadata.updated_at ? new Date(metadata.updated_at).toLocaleString(LOC()) : t("t290")],
+    [t("t291"), metadata.stale ? t("t286") : t("t287"), metadata.stale ? "warn" : "ok"],
+    [t("t292"), metadata.next_refresh ? new Date(metadata.next_refresh).toLocaleString(LOC()) : "—"],
+    [t("t293"), metadata.last_error || t("t294"), metadata.last_error ? "bad" : "ok"],
   ]);
   renderFacts(
     "#last-playground",
     last
       ? [
-          ["结果", last.ok ? "成功" : "失败", last.ok ? "ok" : "bad"],
+          [t("t173"), last.ok ? t("t295") : t("t296"), last.ok ? "ok" : "bad"],
           ["HTTP", last.http_status],
-          ["耗时", `${last.duration_ms} ms`],
+          [t("t104"), `${last.duration_ms} ms`],
           ["Request ID", last.request_id || "—"],
-          ["模型", last.route?.model || "—"],
+          [t("t025"), last.route?.model || "—"],
           [
-            "路由",
+            t("t095"),
             last.route?.tier
               ? `${last.route.tier} / ${last.route.anonymous ? "anonymous" : last.route.key_id || "key"}`
-              : "未路由",
+              : t("t268"),
           ],
         ]
-      : [["状态", "尚无 Playground 追踪"]],
+      : [[t("t026"), t("t297")]],
   );
   renderDiagnosticModels();
   const requests = $("#upstream-requests");
@@ -710,7 +719,7 @@ function renderDiagnostics() {
     .reverse()
     .forEach((request) => {
       const row = document.createElement("tr");
-      appendCell(row, new Date(request.time).toLocaleTimeString());
+      appendCell(row, new Date(request.time).toLocaleTimeString(LOC()));
       appendCell(row, request.request_id);
       appendCell(row, request.model);
       appendCell(row, request.tier || "—");
@@ -718,8 +727,8 @@ function renderDiagnostics() {
       appendCell(row, request.key_id || "—");
       appendCell(row, request.attempts);
       const terminalResults = {
-        stream_error: "流式响应失败",
-        client_canceled: "客户端已取消",
+        stream_error: t("t298"),
+        client_canceled: t("t299"),
       };
       const result = terminalResults[request.outcome]
         ? `HTTP ${request.status} · ${terminalResults[request.outcome]}`
@@ -728,7 +737,7 @@ function renderDiagnostics() {
       appendCell(row, `${request.duration_ms} ms`);
       requests.appendChild(row);
     });
-  if (!requests.children.length) emptyRow(requests, 9, "尚无请求路由");
+  if (!requests.children.length) emptyRow(requests, 9, t("t300"));
   const attempts = $("#upstream-attempts");
   attempts.replaceChildren();
   (monitorData?.upstream?.recent || [])
@@ -736,7 +745,7 @@ function renderDiagnostics() {
     .reverse()
     .forEach((attempt) => {
       const row = document.createElement("tr");
-      appendCell(row, new Date(attempt.time).toLocaleTimeString());
+      appendCell(row, new Date(attempt.time).toLocaleTimeString(LOC()));
       appendCell(row, attempt.request_id);
       appendCell(row, attempt.model);
       appendCell(row, `${attempt.tier} / ${attempt.channel}`);
@@ -746,7 +755,7 @@ function renderDiagnostics() {
       appendCell(row, `${attempt.duration_ms} ms`);
       attempts.appendChild(row);
     });
-  if (!attempts.children.length) emptyRow(attempts, 8, "尚无上游尝试");
+  if (!attempts.children.length) emptyRow(attempts, 8, t("t301"));
 }
 function renderDiagnosticModels() {
   const host = $("#diagnostic-models");
@@ -768,12 +777,12 @@ function renderDiagnosticModels() {
         item.route_error || (plan.length ? plan.join(" → ") : "—"),
         item.route_error ? "bad" : "",
       );
-      appendCell(row, eligibility.allowed ? "允许" : "拒绝", eligibility.allowed ? "ok" : "warn");
+      appendCell(row, eligibility.allowed ? t("t302") : t("t303"), eligibility.allowed ? "ok" : "warn");
       appendCell(row, eligibility.source || "—");
       appendCell(row, `${input == null ? "?" : input} / ${output == null ? "?" : output}`, "cost");
       host.appendChild(row);
     });
-  if (!host.children.length) emptyRow(host, 6, "没有匹配模型");
+  if (!host.children.length) emptyRow(host, 6, t("t304"));
 }
 $("#diagnostic-model-search").addEventListener("input", renderDiagnosticModels);
 async function refreshMonitor() {
@@ -781,7 +790,7 @@ async function refreshMonitor() {
     monitorData = await api("/api/monitor");
     const metrics = monitorData.metrics;
     $("#version").textContent = `version ${monitorData.version}`;
-    $("#m-total").textContent = Number(metrics.last_hour.total || 0).toLocaleString();
+    $("#m-total").textContent = Number(metrics.last_hour.total || 0).toLocaleString(LOC());
     $("#m-rate").textContent = `${((metrics.last_hour.success_rate || 0) * 100).toFixed(1)}%`;
     $("#m-p95").textContent = `${metrics.last_hour.p95_ms || 0} ms`;
     $("#m-active").textContent = `${metrics.active_requests || 0} / ${metrics.active_streams || 0}`;
@@ -796,7 +805,7 @@ $("#refresh-now").onclick = async () => {
   await Promise.all([refreshMonitor(), loadConfig(), loadDebugModels()]);
   if (location.hash === "#model-quotas") await loadModelQuotas();
   if (location.hash === "#api-keys") await loadAPIKeys();
-  toast("状态已刷新");
+  toast(t("t305"));
 };
 function derivedAPIBase() {
   if (!config) return `${location.protocol}//${location.hostname}:8080`;
@@ -818,13 +827,13 @@ function codeCard(label, text) {
   title.textContent = label;
   copy.type = "button";
   copy.className = "copy";
-  copy.textContent = "复制";
+  copy.textContent = t("t087");
   copy.onclick = async () => {
     try {
       await navigator.clipboard.writeText(text);
-      toast("示例已复制");
+      toast(t("t306"));
     } catch (_) {
-      toast("浏览器不允许剪贴板访问", true);
+      toast(t("t284"), true);
     }
   };
   head.append(title, copy);
@@ -878,7 +887,7 @@ function connectLogs() {
       });
     }
   });
-  eventSource.addEventListener("gap", () => toast("较早日志已从内存清除", true));
+  eventSource.addEventListener("gap", () => toast(t("t307"), true));
 }
 function renderLogs() {
   const level = $("#log-level").value,
@@ -903,7 +912,7 @@ function renderLogs() {
       messageNode = document.createElement("span"),
       fieldsNode = document.createElement("span");
     timeNode.className = "log-time";
-    timeNode.textContent = new Date(item.time).toLocaleTimeString();
+    timeNode.textContent = new Date(item.time).toLocaleTimeString(LOC());
     levelNode.className =
       item.level === "error"
         ? "bad"
@@ -924,7 +933,7 @@ function renderLogs() {
   if (!rows.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "等待日志事件…";
+    empty.textContent = t("t308");
     host.appendChild(empty);
   }
   host.scrollTop = host.scrollHeight;
@@ -934,7 +943,7 @@ function renderLogs() {
 );
 $("#log-pause").onclick = () => {
   paused = !paused;
-  $("#log-pause").textContent = paused ? "继续" : "暂停";
+  $("#log-pause").textContent = paused ? t("t309") : t("t149");
   if (!paused) renderLogs();
 };
 let quotaData = null,
@@ -943,7 +952,7 @@ let quotaData = null,
   createdKey = "",
   apiKeysLoading = false;
 const localTime = (value) =>
-  value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
+  value ? new Date(value).toLocaleString(LOC(), { hour12: false }) : "—";
 
 function clearCreatedKey() {
   createdKey = "";
@@ -954,9 +963,9 @@ function clearCreatedKey() {
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
-    toast("已复制");
+    toast(t("t310"));
   } catch {
-    toast("浏览器未允许复制，请手动选中复制", true);
+    toast(t("t311"), true);
   }
 }
 
@@ -964,7 +973,7 @@ async function loadModelQuotas() {
   if (quotaLoading) return;
   quotaLoading = true;
   $("#quota-refresh").disabled = true;
-  $("#quota-refresh").textContent = "读取中…";
+  $("#quota-refresh").textContent = t("t153");
   try {
     const value = await api("/api/model-quotas");
     if (!csrf) return;
@@ -979,14 +988,14 @@ async function loadModelQuotas() {
       select.appendChild(option);
     }
     if ([...select.options].some((option) => option.value === selected)) select.value = selected;
-    if (!select.options.length) select.appendChild(new Option("尚未配置 Go Key", ""));
+    if (!select.options.length) select.appendChild(new Option(t("t312"), ""));
     renderModelQuotas();
   } catch (error) {
-    $("#quota-status").textContent = `查询失败：${error.message}。已有显示仅为上次查询结果。`;
+    $("#quota-status").textContent = t("t313", error.message);
   } finally {
     quotaLoading = false;
     $("#quota-refresh").disabled = false;
-    $("#quota-refresh").textContent = "刷新额度";
+    $("#quota-refresh").textContent = t("t152");
   }
 }
 
@@ -997,17 +1006,17 @@ function renderModelQuotas() {
   const cards = $("#quota-cards");
   cards.replaceChildren();
   $("#quota-status").textContent = !account
-    ? "请先在配置中心添加 OpenCode Go Key。"
+    ? t("t314")
     : account.error
-      ? `${account.error}${stale ? "；下方显示上次成功数据，当前额度未知。" : "；当前额度未知。"}`
-      : "已连接 OpenCode · 共享套餐额度。多个 Key 的额度不相加。";
+      ? t("t315", tx(account.error), t(stale ? "t432" : "t433"))
+      : t("t316");
   $("#quota-updated").textContent = account?.fetched_at
-    ? `${stale ? "上次成功查询" : "额度更新时间"}：${localTime(account.fetched_at)} · 缓存 60 秒 · 来源：OpenCode Go /v1/usage`
+    ? t("t317", t(stale ? "t424" : "t425"), localTime(account.fetched_at))
     : "";
   const windows = [
-    ["rolling", "5 小时窗口"],
-    ["weekly", "每周窗口"],
-    ["monthly", "每月窗口"],
+    ["rolling", t("t318")],
+    ["weekly", t("t319")],
+    ["monthly", t("t320")],
   ];
   for (const [id, label] of windows) {
     const item = account?.windows?.[id];
@@ -1019,15 +1028,15 @@ function renderModelQuotas() {
     card.className = `quota-card${item?.remaining_percent < 20 ? " quota-low" : ""}`;
     heading.textContent = label;
     value.className = "quota-value";
-    value.textContent = item ? `≈ ${item.remaining_percent}%` : "未知";
+    value.textContent = item ? `≈ ${item.remaining_percent}%` : t("t321");
     progress.max = 100;
     if (item) progress.value = item.remaining_percent;
     else progress.value = 0;
-    progress.setAttribute("aria-label", `${label}剩余额度`);
+    progress.setAttribute("aria-label", t("t322", label));
     reset.className = "quota-reset";
     reset.textContent = item
-      ? `${stale ? "历史剩余" : "剩余"} · ${item.status === "rate-limited" ? "已限额 · " : ""}重置于 ${localTime(item.resets_at)}`
-      : "等待上游额度数据";
+      ? t("t323", t(stale ? "t426" : "t427"), item.status === "rate-limited" ? t("t428") : "", localTime(item.resets_at))
+      : t("t324");
     card.append(heading, value, progress, reset);
     cards.appendChild(card);
   }
@@ -1036,7 +1045,7 @@ function renderModelQuotas() {
   $("#quota-model-count").textContent = `${models.length} / ${quotaData.models.length}`;
   const catalog = quotaData.catalog;
   $("#quota-catalog-status").textContent =
-    `${catalog?.stale ? "模型目录暂未更新，显示缓存 · " : ""}目录更新时间：${localTime(catalog?.updated_at)}`;
+    t("t325", catalog?.stale ? t("t429") : "", localTime(catalog?.updated_at));
   const host = $("#quota-models");
   host.replaceChildren();
   for (const model of models) {
@@ -1049,19 +1058,19 @@ function renderModelQuotas() {
     );
     for (const [id] of windows) {
       const item = account?.windows?.[id];
-      appendCell(row, item ? `≈ ${item.remaining_percent}%${stale ? "（历史）" : ""}` : "未知");
+      appendCell(row, item ? t("t326", item.remaining_percent, stale ? t("t430") : "") : t("t321"));
     }
     const cell = document.createElement("td"),
       button = document.createElement("button");
     button.className = "ghost";
-    button.textContent = "复制名称";
+    button.textContent = t("t327");
     button.onclick = () => copyText(model.id);
     cell.appendChild(button);
     row.appendChild(cell);
     host.appendChild(row);
   }
   if (!models.length)
-    emptyRow(host, 6, quotaData.models.length ? "没有匹配的模型" : "模型目录尚未就绪，请稍后刷新");
+    emptyRow(host, 6, quotaData.models.length ? t("t328") : t("t329"));
 }
 $("#quota-refresh").onclick = loadModelQuotas;
 $("#quota-account").onchange = renderModelQuotas;
@@ -1075,7 +1084,7 @@ async function loadAPIKeys() {
     const data = await api("/api/api-keys");
     if (csrf) renderAPIKeys(data.keys);
   } catch (error) {
-    $("#api-key-status").textContent = `读取失败：${error.message}`;
+    $("#api-key-status").textContent = t("t330", error.message);
   } finally {
     apiKeysLoading = false;
     $("#api-key-refresh").disabled = false;
@@ -1092,47 +1101,47 @@ async function mutateAPIKey(id, method, body, button) {
     if (!csrf) return;
     renderAPIKeys(data.keys);
     await loadConfig();
-    toast("已保存并立即生效");
+    toast(t("t331"));
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   } finally {
     button.disabled = false;
   }
 }
 
 function renderAPIKeys(keys) {
-  $("#api-key-count").textContent = `${keys.length} 个`;
-  $("#api-key-status").textContent = `${keys.filter((key) => key.enabled).length} 个已启用`;
+  $("#api-key-count").textContent = t("t332", keys.length);
+  $("#api-key-status").textContent = t("t333", keys.filter((key) => key.enabled).length);
   const host = $("#api-key-list");
   host.replaceChildren();
   for (const key of keys) {
     const row = document.createElement("tr");
     appendCell(row, key.name);
     appendCell(row, key.display, "mono");
-    appendCell(row, key.enabled ? "已启用" : "已停用", key.enabled ? "status ok" : "status warn");
+    appendCell(row, key.enabled ? t("t232") : t("t334"), key.enabled ? "status ok" : "status warn");
     const usage = key.usage || {},
-      summary = (value = {}) => `${formatTokens(value.requests)} 次 · ${formatTokens(value.total_tokens)} tokens`;
+      summary = (value = {}) => t("t335", formatTokens(value.requests), formatTokens(value.total_tokens));
     appendCell(row, `${summary(usage.last_hour)} / ${summary(usage.lifetime)}`);
-    appendCell(row, key.created_at ? localTime(key.created_at) : "已有配置");
+    appendCell(row, key.created_at ? localTime(key.created_at) : t("t336"));
     const cell = document.createElement("td"),
       actions = document.createElement("div");
     actions.className = "key-actions";
     for (const [label, action] of [
       [
-        "重命名",
+        t("t337"),
         (button) => {
-          const name = prompt("密钥名称", key.name);
+          const name = prompt(t("t338"), key.name);
           if (name !== null) mutateAPIKey(key.id, "PATCH", { name }, button);
         },
       ],
       [
-        key.enabled ? "停用" : "启用",
+        key.enabled ? t("t339") : t("t340"),
         (button) => mutateAPIKey(key.id, "PATCH", { enabled: !key.enabled }, button),
       ],
       [
-        "删除",
+        t("t341"),
         (button) => {
-          if (confirm(`删除“${key.name}”后，使用它的应用将无法继续访问。确定删除？`))
+          if (confirm(t("t342", key.name)))
             mutateAPIKey(key.id, "DELETE", null, button);
         },
       ],
@@ -1147,7 +1156,7 @@ function renderAPIKeys(keys) {
     row.appendChild(cell);
     host.appendChild(row);
   }
-  if (!keys.length) emptyRow(host, 6, "暂无 API Key");
+  if (!keys.length) emptyRow(host, 6, t("t343"));
 }
 $("#api-key-form").onsubmit = async (event) => {
   event.preventDefault();
@@ -1171,9 +1180,9 @@ $("#api-key-form").onsubmit = async (event) => {
     $("#api-key-form").reset();
     renderAPIKeys(data.keys);
     await loadConfig();
-    toast("API Key 已创建");
+    toast(t("t344"));
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   } finally {
     button.disabled = false;
   }
@@ -1184,18 +1193,20 @@ $("#api-key-copy").onclick = () => copyText(createdKey);
 $("#api-key-copy-env").onclick = () => copyText($("#api-key-env").textContent);
 let rotationData = null,
   rotationDirty = false;
-const rotationReasons = {
-  success: "成功",
-  client_canceled: "调用方取消",
-  quota_or_rate_limit: "额度不足 / 限流",
-  transport_error: "连接错误",
-  first_output_timeout: "首个输出超时",
-  stream_error: "输出中断",
-  response_read_error: "读取响应失败",
-  response_conversion_error: "响应解析或转换失败",
-  request_conversion_error: "请求转换失败",
-  upstream_error: "上游错误",
-};
+function rotationReasons() {
+  return {
+    success: t("t295"),
+    client_canceled: t("t345"),
+    quota_or_rate_limit: t("t346"),
+    transport_error: t("t347"),
+    first_output_timeout: t("t348"),
+    stream_error: t("t349"),
+    response_read_error: t("t350"),
+    response_conversion_error: t("t351"),
+    request_conversion_error: t("t352"),
+    upstream_error: t("t353"),
+  };
+}
 async function loadRotation() {
   try {
     const value = await api("/api/rotation");
@@ -1204,13 +1215,13 @@ async function loadRotation() {
     rotationDirty = false;
     renderRotation();
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   }
 }
 function renderRotation() {
   const state = rotationData;
   $("#rotation-status").textContent =
-    state.persistence_error || "状态已更新 · 两组独立轮转，所有调用方共享当前位置。";
+    state.persistence_error || t("t354");
   $("#rotation-timeout").value = state.first_output_seconds;
   const host = $("#rotation-groups");
   host.replaceChildren();
@@ -1218,9 +1229,9 @@ function renderRotation() {
     const section = document.createElement("div");
     section.className = "section";
     const title = document.createElement("h2");
-    title.textContent = group.id === "sota" ? "SOTA" : "甜点";
+    title.textContent = group.id === "sota" ? "SOTA" : t("t355");
     const label = document.createElement("label");
-    label.textContent = "调用别名";
+    label.textContent = t("t356");
     label.htmlFor = `rotation-alias-${group.id}`;
     const input = document.createElement("input");
     input.id = label.htmlFor;
@@ -1236,11 +1247,11 @@ function renderRotation() {
     field.append(label, input);
     const current = document.createElement("p");
     current.className = "mono";
-    current.textContent = `当前模型：${group.current || "等待可用模型"}`;
+    current.textContent = t("t357", group.current || t("t431"));
     const table = document.createElement("table");
     table.className = "table";
     const header = document.createElement("tr");
-    for (const text of ["顺序", "模型", "状态 / 恢复时间", "操作"]) {
+    for (const text of [t("t358"), t("t025"), t("t359"), t("t032")]) {
       const th = document.createElement("th");
       th.textContent = text;
       header.append(th);
@@ -1259,18 +1270,18 @@ function renderRotation() {
       appendCell(
         row,
         !group.available[model]
-          ? "已下架 / 暂不可用"
+          ? t("t360")
           : paused
-            ? `暂停至 ${localTime(until)}`
+            ? t("t361", localTime(until))
             : model === group.current
-              ? "当前使用"
-              : "可用",
+              ? t("t362")
+              : t("t234"),
       );
       const actions = document.createElement("td");
       actions.className = "rotation-actions";
       for (const [text, delta] of [
-        ["上移", -1],
-        ["下移", 1],
+        [t("t363"), -1],
+        [t("t364"), 1],
       ]) {
         const button = document.createElement("button");
         button.type = "button";
@@ -1292,9 +1303,9 @@ function renderRotation() {
       const select = document.createElement("button");
       select.type = "button";
       select.className = "ghost";
-      select.textContent = "设为当前";
+      select.textContent = t("t365");
       select.disabled = !group.available[model];
-      select.setAttribute("aria-label", `使用 ${model}`);
+      select.setAttribute("aria-label", t("t366", model));
       select.onclick = async () => {
         select.disabled = true;
         try {
@@ -1313,33 +1324,33 @@ function renderRotation() {
           }
           state.persistence_error = result.persistence_error;
           renderRotation();
-          toast("当前模型已切换");
+          toast(t("t367"));
         } catch (error) {
           select.disabled = false;
-          toast(error.message, true);
+          toast(tx(error.message), true);
         }
       };
       actions.append(select);
       row.append(actions);
       tbody.append(row);
     });
-    if (!group.order.length) emptyRow(tbody, 4, "等待 Go 模型目录");
+    if (!group.order.length) emptyRow(tbody, 4, t("t368"));
     const wrap = document.createElement("div");
     wrap.className = "table-wrap";
     wrap.append(table);
     const recent = document.createElement("div");
     recent.className = "rotation-switches";
     const caption = document.createElement("h3");
-    caption.textContent = "最近切换";
+    caption.textContent = t("t369");
     recent.append(caption);
     for (const item of (group.switches || []).slice(-5).reverse()) {
       const line = document.createElement("p");
-      line.textContent = `${localTime(item.time)} · ${item.from} → ${item.to} · ${rotationReasons[item.reason] || item.reason}`;
+      line.textContent = `${localTime(item.time)} · ${item.from} → ${item.to} · ${(rotationReasons()[item.reason] || item.reason)}`;
       recent.append(line);
     }
     if (!group.switches?.length) {
       const line = document.createElement("p");
-      line.textContent = "尚无切换记录";
+      line.textContent = t("t370");
       recent.append(line);
     }
     section.append(title, field, current, wrap, recent);
@@ -1355,16 +1366,16 @@ function renderRotation() {
       item.alias,
       item.model,
       String(item.number),
-      rotationReasons[item.outcome] || item.outcome,
+      (rotationReasons()[item.outcome] || item.outcome),
     ])
       appendCell(row, value);
     attempts.append(row);
   }
-  if (!state.attempts?.length) emptyRow(attempts, 6, "调用分组别名后显示最近 100 次尝试");
+  if (!state.attempts?.length) emptyRow(attempts, 6, t("t371"));
 }
 $("#rotation-refresh").onclick = () => {
   if (rotationDirty) {
-    toast("有未保存的修改，请先保存后刷新", true);
+    toast(t("t372"), true);
     return;
   }
   loadRotation();
@@ -1384,14 +1395,36 @@ $("#rotation-form").onsubmit = async (event) => {
     rotationData = await api("/api/rotation", { method: "PUT", body: JSON.stringify(body) });
     rotationDirty = false;
     renderRotation();
-    toast("模型轮转配置已保存并生效");
+    toast(t("t373"));
   } catch (error) {
-    toast(error.message, true);
+    toast(tx(error.message), true);
   } finally {
     button.disabled = false;
   }
 };
 boot();
+// ---- i18n: re-render dynamic content on language change ----
+window.o2aLangChanged = () => {
+  const page = (location.hash || "#overview").slice(1);
+  if (pages[page]) openPage(page);
+  else openPage("overview");
+  // openPage covers monitor/guide/usage/quotas/rotation/availability/api-keys;
+  // force-debug pages too in case they hold stale strings.
+  try {
+    if (typeof renderDiagnostics === "function") renderDiagnostics();
+  } catch (_) {}
+  try {
+    if (typeof resetPlayTemplate === "function" && !$("#play-request").value.trim()) resetPlayTemplate();
+  } catch (_) {}
+};
+for (const sel of ["#lang-switch", "#login-lang"]) {
+  const node = $(sel);
+  if (node) {
+    node.value = window.o2aI18n.currentLang();
+    node.addEventListener("change", () => window.o2aI18n.setLang(node.value));
+  }
+}
+
 
 async function loadAvailability() {
   try {
@@ -1401,17 +1434,17 @@ async function loadAvailability() {
     for (const item of data.models) {
       const row = document.createElement("tr");
       const date = (value) =>
-        value && !value.startsWith("0001-") ? new Date(value).toLocaleString() : "待探测";
+        value && !value.startsWith("0001-") ? new Date(value).toLocaleString(LOC()) : t("t374");
       for (const value of [
         item.model,
-        item.disabled ? "已禁用" : "已启用",
-        [item.channel, item.reason].filter(Boolean).join(" / ") || "待探测",
-        item.manual ? "手动" : "自动",
+        item.disabled ? t("t375") : t("t232"),
+        [item.channel, item.reason].filter(Boolean).join(" / ") || t("t374"),
+        item.manual ? t("t376") : t("t377"),
         item.auto_effort?.effort
-          ? `${item.auto_effort.effort}（${date(item.effort_checked_at)}）`
-          : "未验证",
+          ? t("t378", item.auto_effort.effort, date(item.effort_checked_at))
+          : t("t379"),
         date(item.checked_at),
-        item.manual ? "手动控制，不自动探测" : date(item.next_check),
+        item.manual ? t("t380") : date(item.next_check),
       ]) {
         const cell = document.createElement("td");
         cell.textContent = value;
@@ -1419,7 +1452,7 @@ async function loadAvailability() {
       }
       const cell = document.createElement("td");
       const button = document.createElement("button");
-      button.textContent = "恢复启用";
+      button.textContent = t("t381");
       button.disabled = !item.disabled;
       button.onclick = async () => {
         button.disabled = true;
@@ -1440,7 +1473,7 @@ async function loadAvailability() {
       cell.append(button);
       const toggle = document.createElement("button");
       toggle.className = "ghost";
-      toggle.textContent = item.manual ? "切回自动" : "切为手动";
+      toggle.textContent = item.manual ? t("t382") : t("t383");
       toggle.onclick = async () => {
         button.disabled = true;
         toggle.disabled = true;
@@ -1462,7 +1495,7 @@ async function loadAvailability() {
       $("#availability-models").append(row);
     }
     if (!data.models.length)
-      $("#availability-error").textContent = "当前模型目录中没有符合免费资格的模型。";
+      $("#availability-error").textContent = t("t384");
   } catch (error) {
     $("#availability-error").textContent = error.message;
   }
