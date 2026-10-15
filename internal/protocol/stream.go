@@ -92,6 +92,16 @@ func TranscodeStream(ctx context.Context, w http.ResponseWriter, reader io.Reade
 			return emitter.usage, emitter.usageReported, readErr
 		}
 		if termination == streamOpen {
+			if emitter.started {
+				// Truncated-completed: upstream cut the stream after partial content
+				// already reached the client. Emit a clean terminal event so the
+				// client can use what arrived; returning readErr preserves stream_error
+				// in request logs and telemetry metrics.
+				if finishErr := emitter.Finish(); finishErr != nil {
+					return emitter.usage, emitter.usageReported, finishErr
+				}
+				return emitter.usage, emitter.usageReported, readErr
+			}
 			if emitErr := emitUnexpectedStreamError(emitter, readErr); emitErr != nil {
 				return emitter.usage, emitter.usageReported, emitErr
 			}
@@ -106,6 +116,12 @@ func TranscodeStream(ctx context.Context, w http.ResponseWriter, reader io.Reade
 	}
 	if ClientCanceled(ctx, nil) {
 		return emitter.usage, emitter.usageReported, ctx.Err()
+	}
+	if emitter.started {
+		if finishErr := emitter.Finish(); finishErr != nil {
+			return emitter.usage, emitter.usageReported, finishErr
+		}
+		return emitter.usage, emitter.usageReported, errSSEUnexpectedEOF
 	}
 	if err := emitUnexpectedStreamError(emitter, errSSEUnexpectedEOF); err != nil {
 		return emitter.usage, emitter.usageReported, err
@@ -179,6 +195,14 @@ func ForwardStream(ctx context.Context, w http.ResponseWriter, reader io.Reader,
 	if cause == nil {
 		cause = errSSEUnexpectedEOF
 	}
+	if observer.Started() {
+		// Downstream received raw SSE events already; close gracefully.
+		emitter := newBridgeStreamEmitter(w, flusher, protocol, model)
+		if finishErr := emitter.Finish(); finishErr != nil {
+			return usage, observer.Reported(), finishErr
+		}
+		return usage, observer.Reported(), cause
+	}
 	emitter := newBridgeStreamEmitter(w, flusher, protocol, model)
 	if err := emitUnexpectedStreamError(emitter, cause); err != nil {
 		return usage, observer.Reported(), err
@@ -193,6 +217,7 @@ type streamUsageObserver struct {
 	reported bool
 	normal   bool
 	error    bool
+	started  bool
 	parseErr error
 }
 
@@ -232,6 +257,8 @@ func (observer *streamUsageObserver) ErrorTermination() bool { return observer.e
 
 func (observer *streamUsageObserver) ParseError() error { return observer.parseErr }
 
+func (observer *streamUsageObserver) Started() bool { return observer.started }
+
 func (observer *streamUsageObserver) consume(frame []byte) {
 	_ = readSSE(strings.NewReader(string(frame)), func(eventName, data string) error {
 		events, err := observer.parser.Parse(eventName, data)
@@ -243,6 +270,8 @@ func (observer *streamUsageObserver) consume(frame []byte) {
 		}
 		for _, event := range events {
 			switch event.Kind {
+			case "start", "text", "reasoning", "reasoning_signature", "tool_start", "tool_delta":
+				observer.started = true
 			case "done":
 				observer.normal = true
 			case "error":
