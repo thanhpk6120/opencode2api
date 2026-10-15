@@ -335,11 +335,16 @@ func (m *RuntimeManager) Resources() ResourceSnapshot {
 	gateway.goNodes.bindingsMu.Unlock()
 	for _, proxy := range gateway.transports.items {
 		status := ProxyStatus{ID: config.Fingerprint(proxy.name), Index: proxy.index, Address: config.RedactURL(proxy.name), Healthy: proxy.healthy.Load(), Checking: proxy.checking.Load(), Anonymous: gateway.cfg.Anonymous}
-		if proxy.index < len(zenBindings) {
-			status.ZenKeys = zenBindings[proxy.index]
-		}
-		if proxy.index < len(goBindings) {
-			status.GoKeys = goBindings[proxy.index]
+		if gateway.transports != nil && gateway.transports.mode != "" {
+			status.ZenKeys = len(gateway.cfg.ZenKeys)
+			status.GoKeys = len(gateway.cfg.GoKeys)
+		} else {
+			if proxy.index < len(zenBindings) {
+				status.ZenKeys = zenBindings[proxy.index]
+			}
+			if proxy.index < len(goBindings) {
+				status.GoKeys = goBindings[proxy.index]
+			}
 		}
 		result.Proxies = append(result.Proxies, status)
 	}

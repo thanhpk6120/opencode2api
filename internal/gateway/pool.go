@@ -38,6 +38,7 @@ type transportPool struct {
 	// sticky holds the pinned proxy index for sticky mode. It advances to
 	// the next healthy proxy when the pinned one fails.
 	sticky atomic.Uint64
+	roundRobin atomic.Uint64
 }
 
 // anonymousPool gives the shared OpenCode "public" credential an independent
@@ -231,6 +232,34 @@ func (p *transportPool) advanceSticky(failed *proxyTransport) {
 		}
 	}
 	p.sticky.Add(1)
+}
+
+func (p *transportPool) pickRoundRobinHealthy() *proxyTransport {
+	if p == nil || len(p.items) == 0 {
+		return nil
+	}
+	start := int(p.roundRobin.Add(1) - 1)
+	for offset := range len(p.items) {
+		candidate := p.items[(start+offset)%len(p.items)]
+		if candidate.healthy.Load() {
+			return candidate
+		}
+	}
+	return p.items[start%len(p.items)]
+}
+
+func (p *transportPool) pickRandomHealthy() *proxyTransport {
+	if p == nil || len(p.items) == 0 {
+		return nil
+	}
+	start := rand.IntN(len(p.items))
+	for offset := range len(p.items) {
+		candidate := p.items[(start+offset)%len(p.items)]
+		if candidate.healthy.Load() {
+			return candidate
+		}
+	}
+	return p.items[start]
 }
 
 func (p *transportPool) hasHealthy() bool {
@@ -461,14 +490,33 @@ func (p *nodePool) NodeByID(id string) *upstreamNode {
 }
 
 func (p *nodePool) Proxy(node *upstreamNode) *proxyTransport {
-	if p == nil || node == nil || p.transports == nil {
+	if p == nil || p.transports == nil || len(p.transports.items) == 0 {
 		return nil
 	}
-	index := int(node.proxyIndex.Load())
-	if index < 0 || index >= len(p.transports.items) {
-		return nil
+	if len(p.transports.items) == 1 {
+		return p.transports.items[0]
 	}
-	return p.transports.items[index]
+	switch p.mode {
+	case config.ProxyModeSticky:
+		if candidate := p.transports.stickyProxy(); candidate != nil {
+			return candidate
+		}
+	case config.ProxyModeRandom:
+		if candidate := p.transports.pickRandomHealthy(); candidate != nil {
+			return candidate
+		}
+	case config.ProxyModeRoundRobin:
+		if candidate := p.transports.pickRoundRobinHealthy(); candidate != nil {
+			return candidate
+		}
+	}
+	if node != nil {
+		index := int(node.proxyIndex.Load())
+		if index >= 0 && index < len(p.transports.items) {
+			return p.transports.items[index]
+		}
+	}
+	return p.transports.items[0]
 }
 
 // RebindProxy moves every key currently using failedProxy to the least-loaded

@@ -27,7 +27,7 @@ func (g *Gateway) syncProxyResult(ctx context.Context, proxy *proxyTransport, st
 	// In sticky mode, if either the proxy transport failed OR calling the
 	// upstream AI model returned a server/proxy error (HTTP 5xx, e.g. 502/503/504),
 	// mark the proxy unavailable and advance to the next healthy proxy immediately.
-	stickyFailure := g.transports != nil && g.transports.mode == config.ProxyModeSticky && (status >= 500 || isProxyFailure(err))
+	stickyFailure := g.transports != nil && g.transports.mode == config.ProxyModeSticky && (status >= 500 || status == http.StatusTooManyRequests || isProxyFailure(err))
 	if isProxyFailure(err) || stickyFailure {
 		g.rebindFailedProxy(proxy)
 		g.verifyProxyAfterError(ctx, proxy, status)
