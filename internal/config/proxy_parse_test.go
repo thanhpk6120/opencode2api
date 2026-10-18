@@ -44,3 +44,12 @@ func TestNormalizeProxyLines(t *testing.T) {
 		t.Error("expected line-numbered error, got nil")
 	}
 }
+
+func TestEffectiveProxyListDisablesDirect(t *testing.T) {
+	proxies := []string{"direct", "http://10.0.0.1:8080"}
+	disabled := []string{Fingerprint("direct")}
+	eff := EffectiveProxyList(proxies, disabled)
+	if len(eff) != 1 || eff[0] != "http://10.0.0.1:8080" {
+		t.Errorf("EffectiveProxyList did not disable direct: %v", eff)
+	}
+}
