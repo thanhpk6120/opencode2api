@@ -18,6 +18,10 @@ func MaskValue(value string) string {
 }
 
 func RedactURL(raw string) string {
+	clean, pool := ParseProxyEntry(raw)
+	if clean != "" {
+		raw = clean
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "<invalid>"
@@ -28,6 +32,9 @@ func RedactURL(raw string) string {
 		// so operator UI and logs show "***@host:port".
 		s := u.String()
 		return strings.Replace(s, "%2A%2A%2A@", "***@", 1)
+	}
+	if pool && u.Fragment == "" {
+		u.Fragment = "pool"
 	}
 	return u.String()
 }
@@ -60,8 +67,9 @@ func (r *SecretRedactor) Replace(cfg Config) {
 	}
 	for _, value := range cfg.RuntimeProxies() {
 		if value != "direct" {
-			values = append(values, value)
-			if parsed, err := url.Parse(value); err == nil && parsed.User != nil {
+			clean, _ := ParseProxyEntry(value)
+			values = append(values, value, clean)
+			if parsed, err := url.Parse(clean); err == nil && parsed.User != nil {
 				values = append(values, parsed.User.Username())
 				if password, ok := parsed.User.Password(); ok {
 					values = append(values, password)
