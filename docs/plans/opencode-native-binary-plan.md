@@ -1,143 +1,173 @@
-# Kế hoạch Triển khai Kiến trúc Binary OpenCode Chính thức (OpenCode Native Architecture)
+# Kế hoạch Triển khai: OpenCode Process Supervisor & Proxy Adapter Gateway
 
-> **Trạng thái:** Bản thảo (Draft - Chưa triển khai)  
-> **Mục tiêu:** Chuyển đổi từ mô hình Reverse Proxy giả lập (`opencode2api`) sang sử dụng 100% Binary OpenCode chính thức (`opencode serve`) kết hợp OpenAI-compatible Bridge nhằm giải quyết triệt để lỗi "Detect Abuse Traffic" và đảm bảo tính ổn định lâu dài.
-
----
-
-## 1. Bối cảnh & Vấn đề cần giải quyết
-
-### 1.1 Hiện trạng của `opencode2api`
-- `opencode2api` là một cổng API Gateway viết bằng Golang, hoạt động theo cơ chế **giả lập HTTP Client**: mô phỏng User-Agent, cấu trúc phiên `x-opencode-session`, các schema tools giả lập (`read`, `shell`) và các luồng stream SSE để gửi trực tiếp lên Cloud API của OpenCode (`https://opencode.ai`).
-- Điểm mạnh: Nhẹ (RAM ~30MB), có WebUI quản trị trực quan, quản lý và test nhiều Proxy, hỗ trợ failover.
-
-### 1.2 Nguyên nhân gốc rễ lỗi "Detect Abuse Traffic" & HTTP 403
-1. **Lệch chuẩn TLS Fingerprint (JA3/JA4):** Go HTTP Client tạo ra ClientHello khác biệt hoàn toàn so với client chính thức của OpenCode (chạy trên nền Bun/BoringSSL). Hệ thống Cloudflare Bot Management của OpenCode nhận diện đây là automated bot traffic.
-2. **IP máy chủ bị gắn cờ:** Kết nối đi thẳng từ IP máy chủ (`direct`) thuộc dải IP datacenter/Việt Nam bị xếp vào nhóm nghi vấn.
-3. **Tiến trình Probe định kỳ:** Gateway tự động gửi request thăm dò liên tục tới các model miễn phí, kích hoạt ngưỡng phòng thủ chống lạm dụng của máy chủ upstream.
+> **Trạng thái:** Bản thảo Đã cập nhật (Draft - Chờ phê duyệt triển khai)  
+> **Mục tiêu:** Xây dựng cổng Gateway kiêm Bộ giám sát tiến trình (Process Supervisor) cho Binary OpenCode chính thức (`opencode serve`). Kết hợp WebUI quản trị Proxy thông minh, tự động xoay/khởi động lại daemon khi proxy lỗi, quản lý API Key và lọc chỉ cung cấp các model miễn phí cho client bên ngoài.
 
 ---
 
-## 2. Kiến trúc Đề xuất (Target Architecture)
+## 1. Vấn đề & Định hướng Kiến trúc
+
+### 1.1 Điểm yếu của các giải pháp hiện tại
+1. **Gateway Reverse Proxy thuần túy (`opencode2api` hiện tại):**
+   - Phải tự giả lập HTTP request, User-Agent, tool schema và TLS ClientHello bằng Golang. Dễ bị Cloudflare Bot Management của OpenCode phát hiện là automated bot traffic và chặn bằng lỗi `FreeTierError` / `Detect Abuse Traffic`.
+2. **Binary OpenCode chính thức đứng độc lập (`opencode serve`):**
+   - Mang 100% chữ ký TLS và logic agent chính chủ, hoàn toàn không bị chặn bot.
+   - **Tuy nhiên:** Không có WebUI quản trị, không có hệ thống quản lý nhiều proxy (chỉ nhận 1 proxy cố định qua `HTTP_PROXY`, chết proxy là sập dịch vụ), không thể lọc model (client có thể gọi nhầm model trả phí) và không có phân quyền API Key độc lập cho từng client.
+
+### 1.2 Định hướng: Kiến trúc Supervisor & Proxy Adapter Gateway
+Xây dựng tầng Gateway trung gian thông minh (kế thừa toàn bộ WebUI và Proxy Manager của dự án hiện tại) đóng 3 vai trò:
+- **Process Supervisor:** Tự động điều phối vòng đời tiến trình con `opencode serve`, nạp proxy động vào biến môi trường `HTTP_PROXY`.
+- **Auto-Failover Engine:** Khi phát hiện proxy hiện tại bị lỗi/chết hoặc dính 403, tự động chuyển proxy và restart daemon `opencode serve` ngầm để tự phục hồi kết nối.
+- **API Gate & Model Filter:** Tiếp nhận chuẩn OpenAI API, xác thực API Key của client, và lọc danh mục model chỉ trả về các model miễn phí (`free_only`).
+
+---
+
+## 2. Sơ đồ Kiến trúc Tổng thể (System Architecture)
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                 Client Applications                         │
-│  (NextChat, LibreChat, Open WebUI, Claude Code, Cline, etc.)│
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Chuẩn OpenAI API (/v1/chat/completions)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│              OpenAI-Compatible Bridge Service               │
-│               (Port 20160 - Cổng đối ngoại)                 │
-│  - Tiếp nhận request chuẩn OpenAI / Anthropic format         │
-│  - Chuyển đổi sang REST API của OpenCode Native Server      │
-│  - Xử lý xác thực Token & Model Mapping                     │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Internal HTTP / SSE (Port 4096)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│             OpenCode Native Daemon (Official CLI)           │
-│                   `opencode serve --port 4096`              │
-│  - 100% Runtime gốc OpenCode (Bun / Node.js)                │
-│  - Đúng chuẩn TLS ClientHello, Session State & Agent Tools  │
-│  - Miễn nhiễm hoàn toàn với Bot Detection / Abuse Traffic   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Egress via HTTP_PROXY / HTTPS_PROXY
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Egress Proxy Pool                       │
-│    (Residential / US Proxy sạch - có hỗ trợ rotating)       │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Internet (HTTPS)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   OpenCode Cloud API                        │
-│                 (https://opencode.ai)                       │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                   Client Applications (Bên ngoài)                      │
+│       (NextChat, Open WebUI, LibreChat, Cursor, Cline, Claude Code)     │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Chuẩn OpenAI API (/v1/chat/completions)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│             OPENCODE SUPERVISOR GATEWAY (Cổng Trung Gian)              │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ 1. WebUI Admin Console:                                          │  │
+│  │    - Giám sát tiến trình OpenCode (Status, PID, Port, Proxy dùng)│  │
+│  │    - Quản lý danh sách Proxy Egress (Thêm, sửa, xoá, test ping ms│  │
+│  │    - Chế độ dùng Proxy (Sticky, Round-robin, Random)             │  │
+│  │    - Quản lý API Key độc lập cho từng ứng dụng client            │  │
+│  │    - Quản lý Model & Công tắc "Chỉ cho phép Model Miễn Phí"      │  │
+│  │    - Nút thao tác nhanh: Restart Daemon, Kiểm tra Update Binary  │  │
+│  ├──────────────────────────────────────────────────────────────────┤  │
+│  │ 2. API Adapter & Auth Gate:                                      │  │
+│  │    - Xác thực Bearer Token từ client                             │  │
+│  │    - GET /v1/models: Lọc sạch chỉ trả về các model Free          │  │
+│  │    - POST /v1/chat/completions: Nhận request và chuyển tiếp      │  │
+│  ├──────────────────────────────────────────────────────────────────┤  │
+│  │ 3. Process Supervisor & Auto-Failover Engine:                    │  │
+│  │    - Spawn tiến trình con `opencode serve --port 4096`           │  │
+│  │    - Tiêm HTTP_PROXY tương ứng với proxy đang được chọn          │  │
+│  │    - Bắt lỗi: Nếu proxy timeout / 403 / mất mạng:                │  │
+│  │      -> Chọn proxy mới trong pool -> Restart daemon ngầm         │  │
+│  │      -> Retry request vừa gửi (Seamless Failover)                │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Gọi nội bộ localhost (127.0.0.1:4096)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                    OpenCode Official Subprocess                        │
+│                   `opencode serve --port 4096`                         │
+│  - Chạy bằng runtime chính thức (Node.js / Bun)                     │
+│  - Mang 100% TLS Fingerprint gốc, User-Agent & Session thật         │
+│  - Miễn nhiễm hoàn toàn với Bot Detection / Detect Abuse Traffic    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Egress HTTPS qua Proxy được cấp
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Active Egress Proxy                             │
+│                 (http://user:pass@14.241.72.179:20370...)              │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Internet (HTTPS)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                     OpenCode Cloud (opencode.ai)                       │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Đánh giá Môi trường Server Hiện tại (`thanhpk@192.168.1.68`)
+## 3. Các Khối Chức năng Trọng tâm
 
-Đã kiểm tra thực tế trên server và xác nhận **100% đủ điều kiện**:
-- **Hệ điều hành:** Ubuntu 24.04 LTS x86_64, Linux kernel `6.8.0`.
-- **Runtime có sẵn:** Node.js `v24.21.0`, npm `11.19.0`.
-- **Tài nguyên:** RAM khả dụng ~3.8 GB, dung lượng ổ đĩa trống ~19 GB (đáp ứng thoải mái cho tiến trình `opencode serve` tốn ~150-300MB RAM).
-- **Package chính thức:** `opencode-ai` bản mới nhất `1.19.3` có sẵn trên npm.
+### 3.1 Bộ Điều khiển Tiến trình & Tự Động Phục Hồi (Process Supervisor)
+- **Cơ chế Spawn:** Gateway sử dụng `os/exec` quản lý tiến trình con:
+  ```bash
+  opencode serve --hostname 127.0.0.1 --port 4096
+  ```
+  kèm các biến môi trường:
+  ```env
+  HTTP_PROXY=http://user:pass@proxy-active:port
+  HTTPS_PROXY=http://user:pass@proxy-active:port
+  NO_PROXY=127.0.0.1,localhost
+  ```
+- **Hot-Restart Failover (Xử lý khi Proxy chết / lỗi 403):**
+  - Khi một request gửi tới daemon bị timeout, lỗi mạng, hoặc trả về HTTP 403 / 429:
+    1. Gateway tạm thời giữ kết nối của Client (queue request).
+    2. Đánh dấu proxy hiện tại là lỗi trong danh sách.
+    3. Chọn proxy hoạt động tiếp theo trong pool.
+    4. Gửi tín hiệu ngắt tiến trình daemon cũ (`SIGTERM`) và khởi chạy daemon mới với biến `HTTP_PROXY` của proxy mới (thời gian khởi động lại của `opencode serve` thường chỉ mất ~500ms - 1s).
+    5. Gửi lại request của client qua daemon mới. Client nhận được kết quả thành công mà không bị đứt đoạn.
+
+### 3.2 Bộ Lọc Model (Free-Only Enforcement)
+- **Mục tiêu:** Ngăn chặn tuyệt đối việc client gọi nhầm hoặc nhìn thấy model tính phí.
+- **Cơ chế:**
+  - Endpoint `GET /v1/models` lấy danh mục từ daemon, áp dụng bộ lọc regex/metadata: chỉ giữ lại các model có hậu tố `-free` (như `deepseek-v4.1-flash-free`, `glm-5.3-flash-free`, `kimi-k3-free`, `big-pickle`...).
+  - Endpoint `POST /v1/chat/completions`: Nếu client truyền model không nằm trong danh mục Free được duyệt, Gateway từ chối ngay lập tức với lỗi `400 Bad Request: Model is restricted to free models only`.
+
+### 3.3 Quản lý API Key cho Client
+- Kế thừa toàn bộ hệ thống API Key của `opencode2api`:
+  - Tạo, đặt tên và quản lý nhiều API Key cho các client khác nhau (Cursor, NextChat, LibreChat, Open WebUI).
+  - Phân tách độc lập: Client bên ngoài chỉ giao tiếp bằng Key do Gateway cấp, không có quyền truy cập vào token gốc của OpenCode.
+
+### 3.4 Quản lý Proxy & Giao diện WebUI
+- **WebUI Tabbed hiện tại được nâng cấp thêm Tab "OpenCode Daemon":**
+  - Hiển thị trạng thái daemon: Trạng thái (Running/Stopped/Restarting), PID, Port nội bộ, Proxy đang gắn kết, thời gian Uptime.
+  - Nút bấm điều khiển: **Restart Daemon**, **Đổi Proxy đang dùng thủ công**.
+  - Nút **"Cập nhật OpenCode Binary"**: Khi bấm, Gateway chạy lệnh `npm update -g opencode-ai`, thông báo phiên bản mới và tự restart daemon.
+- **Tab Quản lý Proxy:** Giữ nguyên 100% tính năng hiện tại: đo ping ms, thêm hàng loạt, bật/tắt, sửa, xóa, chọn mode Sticky/Round-robin/Random.
 
 ---
 
-## 4. Kế hoạch Triển khai Chi tiết (Phased Execution)
+## 4. Kế hoạch Triển khai Chi tiết
 
-### Giai đoạn 1: Thiết lập Daemon OpenCode Chính thức
-1. **Cài đặt package CLI toàn cục:**
+### Giai đoạn 1: Chuẩn bị Môi trường Server (`thanhpk@192.168.1.68`)
+1. **Cài đặt OpenCode CLI chính thức:**
    ```bash
    npm install -g opencode-ai
+   opencode --version
    ```
-2. **Tạo thư mục cấu hình và chạy thử nghiệm:**
-   - Thư mục làm việc: `/home/thanhpk/opencode-native/`
-   - File cấu hình môi trường `.env`:
-     ```env
-     HTTP_PROXY=http://1111x62:dd1431@14.241.72.179:20370
-     HTTPS_PROXY=http://1111x62:dd1431@14.241.72.179:20370
-     OPENCODE_SERVER_PASSWORD=your_secure_password
-     ```
-3. **Cấu hình Systemd Service quản lý tiến trình nền:**
-   - Tạo file service `/etc/systemd/system/opencode-daemon.service`:
-     - Chạy lệnh: `opencode serve --hostname 127.0.0.1 --port 4096`
-     - Tự động restart khi crash (`Restart=always`, `RestartSec=5s`).
-     - Tích hợp nạp biến môi trường Proxy từ file `.env`.
+2. **Kiểm tra quyền thực thi tiến trình con:**
+   - Đảm bảo user chạy service có quyền spawn tiến trình, ghi thư mục log và bind port `4096`.
 
-### Giai đoạn 2: Triển khai Cổng Tương thích (OpenAI API Bridge)
-1. **Lựa chọn giải pháp Bridge:**
-   - Sử dụng giải pháp bridge mã nguồn mở chuyên dụng cho OpenCode CLI (ví dụ: `opengate` hoặc `personal-opencode-zen-gateway`).
-   - Thiết lập cổng lắng nghe bên ngoài: **`20160`** (không xung đột với cổng `20150/20151` của gateway hiện tại).
-2. **Cấu hình Model Mapping & Quản lý Key:**
-   - Thiết lập Bearer Token cho các client gọi vào.
-   - Định tuyến các model phổ biến:
-     - `deepseek-v4.1-flash` -> `deepseek-v4.1-flash-free`
-     - `glm-5.3` -> `glm-5.3-flash-free`
-     - `kimi-k3` -> `kimi-k3-free`
+### Giai đoạn 2: Phát triển Tầng Supervisor & Adapter (Golang)
+1. **Kế thừa mã nguồn hiện tại:**
+   - Tận dụng toàn bộ core WebUI, I18N, Auth CSRF/Session, Admin API và Proxy Pool Manager.
+2. **Thay thế Module Upstream:**
+   - Xây dựng gói `internal/supervisor`: quản lý tiến trình con `opencode serve`, pipe stdin/stdout/stderr, cơ chế spawn với environment proxy động.
+   - Xây dựng gói `internal/adapter`: chuyển đổi request từ chuẩn OpenAI sang API của `opencode serve` nội bộ (hỗ trợ stream SSE mượt mà).
+   - Tích hợp logic Auto-Failover: bắt mã lỗi kết nối -> chọn proxy mới -> restart daemon -> retry request.
+3. **Bổ sung API & UI quản trị Daemon:**
+   - Endpoint `GET /api/daemon/status`: Trả về trạng thái tiến trình và proxy hiện tại.
+   - Endpoint `POST /api/daemon/restart`: Cho phép restart daemon với proxy mới.
+   - Endpoint `POST /api/daemon/upgrade`: Chạy lệnh `npm update -g opencode-ai`.
 
-### Giai đoạn 3: Kiểm thử Đối chuẩn & Đo lường
-1. **Kiểm tra khả năng vượt qua Bot Detection:**
-   - Gửi các request test gọi model free từ client bên ngoài thông qua cổng `20160`.
-   - Xác nhận response trả về `200 OK`, stream SSE mượt mà, không còn xuất hiện lỗi `FreeTierError` hay `Detect Abuse Traffic`.
-2. **Đo lường hiệu năng và độ ổn định:**
-   - Tốc độ phản hồi thời gian đầu (TTFT - Time To First Token).
-   - Kiểm tra mức tiêu thụ RAM và CPU của tiến trình daemon sau 24h chạy liên tục.
+### Giai đoạn 3: Kiểm thử Chức năng & Tự Phục Hồi
+1. **Kiểm tra vượt rào Bot Detection:**
+   - Gọi request model free qua Gateway, xác nhận không còn dính lỗi `Detect Abuse Traffic` hay `FreeTierError` do dùng binary chính chủ.
+2. **Kiểm tra kịch bản Failover (Giả lập Proxy chết):**
+   - Chủ động ngắt kết nối của proxy đang active.
+   - Xác nhận: Gateway tự phát hiện lỗi, chọn proxy kế tiếp, khởi động lại daemon với proxy mới và hoàn tất request thành công cho client.
+3. **Kiểm tra bộ lọc Free-Only:**
+   - Thử gọi model không phải free và xác nhận Gateway chặn lại đúng quy định.
 
-### Giai đoạn 4: Tự động hóa Cập nhật (Auto-update Pipeline)
-1. **Script cập nhật 1 chạm (`/home/thanhpk/update-opencode-native.sh`):**
-   ```bash
-   #!/usr/bin/env bash
-   set -euo pipefail
-   echo "[$(date)] Kiểm tra cập nhật OpenCode CLI..."
-   npm update -g opencode-ai
-   systemctl restart opencode-daemon
-   systemctl restart opencode-bridge
-   echo "[$(date)] Cập nhật và khởi động lại dịch vụ thành công!"
-   ```
-2. **Cronjob định kỳ:**
-   - Thiết lập cronjob chạy tự động vào 03:00 Chủ nhật hàng tuần để kéo bản vá upstream mới nhất mà không cần can thiệp thủ công.
-
-### Giai đoạn 5: Chuyển đổi Chính thức (Cutover) & Thu hồi Hệ thống Cũ
-1. **Chuyển đổi Client:**
-   - Cập nhật URL API trên các client từ port `20150` sang port `20160`.
-2. **Dừng và thu hồi tài nguyên cũ:**
-   - Khi hệ thống mới chạy ổn định tuyệt đối sau 3–5 ngày, tiến hành dừng container `opencode2api` cũ để giải phóng RAM và port `20150/20151`.
+### Giai đoạn 4: Đóng gói & Triển khai Bền vững
+1. **Cấu hình Systemd Service trên Server:**
+   - Đóng gói Gateway thành một service duy nhất quản lý toàn bộ (`/etc/systemd/system/opencode-gateway.service`).
+   - Gateway tự động khởi chạy và trông coi tiến trình `opencode serve` con.
+2. **Chiến lược Zero-Downtime:**
+   - Chạy trên port mới (ví dụ `20160`) để kiểm tra song song với hệ thống cũ.
+   - Khi nghiệm thu hoàn tất, chuyển cổng chính hoặc trỏ client sang mà không gây gián đoạn dịch vụ.
 
 ---
 
-## 5. Kế hoạch Dự phòng & Quản lý Rủi ro (Risk & Rollback)
+## 5. Đánh giá Tính Khả thi & Lợi ích Thu được
 
-| Rủi ro tiềm ẩn | Mức độ | Biện pháp giảm thiểu |
+| Tiêu chí | Mô hình Cũ (`opencode2api`) | Mô hình Mới (Supervisor + Native Binary) |
 |---|---|---|
-| **Egress Proxy gặp sự cố** | Trung bình | Cấu hình script tự kiểm tra ping của proxy trong file `.env`, tự động switch sang proxy dự phòng nếu proxy chính die. |
-| **Bridge Service chiếm dụng RAM** | Thấp | Cấu hình giới hạn tài nguyên trong systemd (`MemoryMax=512M`). |
-| **Xung đột khi chưa nghiệm thu** | Rất thấp | Chạy song song độc lập trên port riêng (`20160`), container cũ trên port `20150` vẫn hoạt động 100% nguyên vẹn. |
-
-**Phương án Rollback:**  
-Nếu kiến trúc mới không đạt yêu cầu, chỉ cần tắt service `systemctl stop opencode-daemon opencode-bridge`. Mọi lưu lượng client vẫn trỏ về container `opencode2api` trên port `20150` như hiện tại mà không có bất kỳ thời gian gián đoạn (zero downtime) nào.
+| **Chống Bot / Abuse Traffic** | Phải vá code liên tục mỗi khi upstream siết luật | **Miễn nhiễm 100%** (Dùng đúng runtime Bun/Node của OpenCode) |
+| **Giao diện Web Quản trị** | Có sẵn | **Giữ nguyên và bổ sung thêm tab quản lý Daemon** |
+| **Quản lý & Xoay Proxy** | Độc lập trong Gateway | **Tự động đổi proxy và restart daemon khi có lỗi** |
+| **Lọc Model Miễn Phí** | Cơ bản | **Kiểm soát chặt chẽ ở cả danh mục và tầng thực thi** |
+| **Khả năng nâng cấp** | Phải sửa mã nguồn Go | **Chỉ cần 1 nút bấm hoặc 1 lệnh `npm update`** |
