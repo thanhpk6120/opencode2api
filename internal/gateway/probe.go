@@ -82,7 +82,12 @@ func (g *Gateway) probeFreeModel(ctx context.Context, model string) probeResult 
 	var lanes []lane
 	if g.cfg.Anonymous {
 		cursor := g.anonymous.CursorFor(ids.Session)
-		if node := cursor.Next(); node != nil {
+		limit := g.anonymous.Len()
+		for range limit {
+			node := cursor.Next()
+			if node == nil {
+				break
+			}
 			// Prefer the legacy /zen/v1 lane before falling back to /inference.
 			for _, baseURL := range g.anonymousUpstreams() {
 				lanes = append(lanes, lane{anonymousZenKey, "anonymous", baseURL, node.proxy.client})
@@ -90,7 +95,12 @@ func (g *Gateway) probeFreeModel(ctx context.Context, model string) probeResult 
 		}
 	}
 	cursor := g.zenNodes.CursorFor(ids.Session)
-	if node := cursor.Next(); node != nil {
+	limit := g.zenNodes.Len()
+	for range limit {
+		node := cursor.Next()
+		if node == nil {
+			break
+		}
 		if proxy := g.zenNodes.Proxy(node); proxy != nil {
 			lanes = append(lanes, lane{node.key, "zen", g.cfg.Upstream.Zen, proxy.client})
 		}
