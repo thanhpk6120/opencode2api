@@ -10,12 +10,13 @@ import overview from "./pages/overview.js";
 import diagnostics from "./pages/diagnostics.js";
 import access from "./pages/access.js";
 import apiKeys from "./pages/api-keys.js";
+import proxies from "./pages/proxies.js";
 import quotas from "./pages/model-quotas.js";
 import rotation from "./pages/rotation.js";
 import configPage from "./pages/config.js";
 import account from "./pages/account.js";
 
-const PAGES = [overview, diagnostics, access, apiKeys, quotas, rotation, configPage, account];
+const PAGES = [overview, diagnostics, access, apiKeys, proxies, quotas, rotation, configPage, account];
 const byId = new Map(PAGES.map((page) => [page.id, page]));
 
 // Hrefs from the previous 13-page layout keep working.

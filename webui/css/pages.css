@@ -377,3 +377,10 @@
     grid-column: 1 / -1;
   }
 }
+
+/* Proxies page */
+#page-proxies .mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+}

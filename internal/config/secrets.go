@@ -26,15 +26,15 @@ func RedactURL(raw string) string {
 	if err != nil {
 		return "<invalid>"
 	}
+	if pool && u.Fragment == "" {
+		u.Fragment = "pool"
+	}
 	if u.User != nil {
 		u.User = url.User("***")
 		// url.String percent-encodes "*" to %2A; keep the literal mask
 		// so operator UI and logs show "***@host:port".
 		s := u.String()
 		return strings.Replace(s, "%2A%2A%2A@", "***@", 1)
-	}
-	if pool && u.Fragment == "" {
-		u.Fragment = "pool"
 	}
 	return u.String()
 }

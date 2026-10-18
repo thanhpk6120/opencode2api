@@ -49,6 +49,7 @@
             <div class="nav-group-title" data-i18n="nav.group.integration">接入</div>
             <button class="nav-item" data-page="access" data-i18n="nav.access">接入指南</button>
             <button class="nav-item" data-page="api-keys" data-i18n="nav.api-keys">API Key 管理</button>
+            <button class="nav-item" data-page="proxies" data-i18n="nav.proxies">代理管理</button>
           </div>
           <div class="nav-group">
             <div class="nav-group-title" data-i18n="nav.group.models">模型</div>
@@ -584,6 +585,99 @@
               <p class="section-caption" data-i18n="apikeys.note">
                 停用和删除会使对应应用的新请求返回 401。至少保留一个启用的 Key。
               </p>
+            </section>
+          </section>
+
+          <section id="page-proxies" class="page hidden">
+            <section class="section">
+              <div class="section-head">
+                <div>
+                  <h2 class="section-title" data-i18n="proxies.mode.title">出口代理模式</h2>
+                  <p class="section-caption" data-i18n="proxies.mode.caption">
+                    配置请求出口代理策略，支持 Sticky 单代理故障切换及轮询 / 随机模式。
+                  </p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="proxy-mode" data-i18n="proxies.mode.label">使用模式</label>
+                  <select id="proxy-mode" class="select">
+                    <option value="sticky" data-i18n="proxies.mode.sticky">Sticky 单代理（5xx 自动故障切换）</option>
+                    <option value="roundrobin" data-i18n="proxies.mode.roundrobin">按顺序轮询</option>
+                    <option value="random" data-i18n="proxies.mode.random">随机选择</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label data-i18n="proxies.mode.descLabel">策略说明</label>
+                  <div id="proxy-mode-desc" class="section-caption" role="status"></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="section">
+              <div class="section-head">
+                <div>
+                  <h2 class="section-title">
+                    <span data-i18n="proxies.list.title">代理列表</span>
+                    <span id="proxy-count" class="section-caption"></span>
+                  </h2>
+                  <p class="section-caption" data-i18n="proxies.list.caption">
+                    当前配置的出口代理（凭证已脱敏）。禁用或故障的代理将自动从请求流中剔除。
+                  </p>
+                </div>
+                <div class="actions" style="display:flex;gap:8px">
+                  <button id="proxy-test-all" class="btn btn-sm" data-i18n="proxies.testAll">
+                    测试全部
+                  </button>
+                  <button id="proxy-refresh" class="btn btn-sm" data-i18n="proxies.refresh">
+                    刷新列表
+                  </button>
+                </div>
+              </div>
+              <p id="proxy-status" class="section-caption" role="status" aria-live="polite"></p>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th data-i18n="proxies.col.address">代理地址</th>
+                      <th data-i18n="proxies.col.health">健康状态</th>
+                      <th data-i18n="proxies.col.state">启停状态</th>
+                      <th data-i18n="proxies.col.binding">密钥与匿名绑定</th>
+                      <th data-i18n="proxies.col.action">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="proxy-list"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="section">
+              <div class="section-head">
+                <div>
+                  <h2 class="section-title" data-i18n="proxies.add.title">批量添加代理</h2>
+                  <p class="section-caption" data-i18n="proxies.add.caption">
+                    每行一个代理。支持 host:port:user:pass、host:port 以及完整 URL（http/https/socks5）。
+                  </p>
+                </div>
+              </div>
+              <form id="proxy-add-form">
+                <div class="form-grid">
+                  <div class="field full">
+                    <label for="proxy-add-lines" data-i18n="proxies.add.label">代理列表（每行一个）</label>
+                    <textarea
+                      id="proxy-add-lines"
+                      rows="4"
+                      placeholder="10.0.0.1:8080:user:pass&#10;socks5://user:pass@10.0.0.2:1080"
+                      data-i18n-attr="placeholder:proxies.add.placeholder"
+                    ></textarea>
+                  </div>
+                </div>
+                <div class="actions">
+                  <button id="proxy-add" class="btn btn-sm btn-primary" data-i18n="proxies.add.submit">
+                    添加代理
+                  </button>
+                </div>
+              </form>
             </section>
           </section>
 

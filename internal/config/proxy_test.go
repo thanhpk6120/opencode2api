@@ -31,9 +31,8 @@ func TestParseProxyEntry(t *testing.T) {
 }
 
 func TestRedactURLKeepsPoolMarker(t *testing.T) {
-	// url.User("***") percent-escapes the asterisks; that is the existing
-	// RedactURL shape for every proxy, so the expectation mirrors it.
-	const masked = "http://%2A%2A%2A@127.0.0.1:7890#pool"
+	// RedactURL preserves literal *** in UI and logs.
+	const masked = "http://***@127.0.0.1:7890#pool"
 	if got := RedactURL("http://user:pass@127.0.0.1:7890#pool"); got != masked {
 		t.Errorf("pool URL redacted as %q, want %q", got, masked)
 	}
