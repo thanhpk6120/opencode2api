@@ -316,14 +316,26 @@ function render() {
         class: "btn btn-sm btn-ghost",
         text: t("编辑", "proxies.action.edit"),
         click: async () => {
+          // Never prefill the displayed address: it is redacted ("***@…"), and
+          // saving it back would overwrite the real credentials with the mask.
           const val = await promptDialog({
             title: t("编辑代理地址", "proxies.edit.title"),
-            label: t("代理地址（host:port:user:pass 或完整 URL）", "proxies.edit.label"),
-            value: proxy.address,
+            label: t(
+              "输入完整地址（含账号密码）：host:port:user:pass 或完整 URL。留空取消。",
+              "proxies.edit.label",
+            ),
+            value: "",
+            placeholder: "http://user:pass@10.0.0.1:8080",
             confirmLabel: t("保存", "common.save"),
           });
-          if (val && val.trim() && val.trim() !== proxy.address) {
-            mutateProxy(proxy.id, "PATCH", { address: val.trim() }, btnEdit);
+          const next = (val || "").trim();
+          if (!next) return;
+          if (next.includes("***")) {
+            toast(t("地址已被隐藏，请输入含账号密码的完整地址", "proxies.edit.masked"), true);
+            return;
+          }
+          if (next !== proxy.address) {
+            mutateProxy(proxy.id, "PATCH", { value: next }, btnEdit);
           }
         },
       });

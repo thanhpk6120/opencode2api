@@ -166,6 +166,9 @@ func (a *Server) handleUpdateProxy(w http.ResponseWriter, r *http.Request) {
 			return errUnknownProxy
 		}
 		if strings.TrimSpace(input.Value) != "" {
+			if err := rejectRedactedProxyValue(input.Value); err != nil {
+				return err
+			}
 			normalized, err := config.ParseProxyLine(input.Value)
 			if err != nil {
 				return err
@@ -305,6 +308,17 @@ var (
 	errUnknownProxy   = proxyErr("unknown or stale proxy id")
 	errDuplicateProxy = proxyErr("proxy already exists")
 )
+
+// rejectRedactedProxyValue stops a client from saving the masked address the UI
+// displays ("http://***@host:port"). ParseProxyLine accepts that string and would
+// replace the real credentials with the literal mask, permanently breaking the
+// proxy entry.
+func rejectRedactedProxyValue(value string) error {
+	if strings.Contains(value, "***@") || strings.Contains(value, "%2A%2A%2A@") {
+		return proxyErr("address is masked; enter the full address including credentials")
+	}
+	return nil
+}
 
 type proxyErr string
 
