@@ -21,4 +21,5 @@ coverage.out
 # Local credentials, deployment backups, and verification artifacts
 .local/
 .smoke2/
+.smoke3/
 *.availability.json

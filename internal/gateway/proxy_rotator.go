@@ -183,10 +183,14 @@ func (r *proxyRotator) renew(proxy *proxyTransport, reason string) {
 
 		rangeKey := r.probeExitRange(proxy)
 		if rangeKey == "" {
-			// The exit address could not be read, so there is nothing to judge
-			// the new exit against. Accept the rotation instead of looping on a
-			// probe that cannot tell a good exit from a bad one.
+			// The exit address could not be read. That says nothing about whether
+			// the exit works, so fall through to the model probe rather than
+			// assuming the rotation succeeded.
 			r.logger.Info("proxy exit rotated (exit range unknown)", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name), "reason", reason, "status", status)
+			if ok, feasible := r.probeModelCall(proxy); feasible && !ok {
+				r.logger.Warn("rotated exit failed the model probe", "component", "proxy", "event", "rotate_probe_failed", "proxy", config.RedactURL(proxy.name), "reason", reason, "attempt", attempt+1)
+				continue
+			}
 			r.resume(proxy, reason, "")
 			return
 		}
