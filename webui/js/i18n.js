@@ -406,7 +406,9 @@ const DICTIONARY = {
       "proxies.action.disable": "Disable",
       "proxies.action.delete": "Delete",
       "proxies.edit.title": "Edit proxy address",
-      "proxies.edit.label": "Proxy address (host:port:user:pass or full URL)",
+      "proxies.edit.label":
+        "Full address including credentials: host:port:user:pass or a full URL. Leave empty to cancel.",
+      "proxies.edit.masked": "That address is hidden here; enter the full address including credentials",
       "proxies.delete.title": "Confirm deletion",
       "proxies.delete.confirm": "Are you sure you want to delete proxy {0}?",
       "proxies.add.title": "Bulk-add proxies",
@@ -1031,7 +1033,9 @@ const DICTIONARY = {
       "proxies.action.disable": "Tắt",
       "proxies.action.delete": "Xóa",
       "proxies.edit.title": "Sửa địa chỉ proxy",
-      "proxies.edit.label": "Địa chỉ proxy (host:port:user:pass hoặc URL đầy đủ)",
+      "proxies.edit.label":
+        "Địa chỉ đầy đủ kèm tài khoản/mật khẩu: host:port:user:pass hoặc URL đầy đủ. Để trống để hủy.",
+      "proxies.edit.masked": "Địa chỉ này đang được ẩn; hãy nhập địa chỉ đầy đủ kèm tài khoản/mật khẩu",
       "proxies.delete.title": "Xác nhận xóa",
       "proxies.delete.confirm": "Bạn có chắc chắn muốn xóa proxy {0} không?",
       "proxies.add.title": "Thêm nhanh proxy",
