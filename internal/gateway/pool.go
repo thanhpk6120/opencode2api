@@ -29,6 +29,21 @@ type proxyTransport struct {
 	client   *http.Client
 	healthy  atomic.Bool
 	checking atomic.Bool
+	// rotating marks a proxy whose exit IP can be changed on demand (a #pool
+	// entry or one with a rotate link). Rotating proxies are tried first so the
+	// static ones stay available as the fallback while an exit is renewed.
+	rotating atomic.Bool
+	// refreshing is set while a rotating proxy is being renewed. Traffic skips
+	// it and falls back to the static proxies until a working exit is found.
+	refreshing atomic.Bool
+}
+
+// isRotating reports whether this proxy can change its exit IP.
+func (p *proxyTransport) isRotating() bool { return p != nil && p.rotating.Load() }
+
+// available reports whether traffic may use this proxy right now.
+func (p *proxyTransport) available() bool {
+	return p != nil && p.healthy.Load() && !p.refreshing.Load()
 }
 
 type transportPool struct {
@@ -131,7 +146,7 @@ func (p *anonymousPool) pinnedIndex() int {
 	pinned := int(p.transports.sticky.Load() % uint64(len(p.nodes)))
 	for offset := 0; offset < len(p.nodes); offset++ {
 		idx := (pinned + offset) % len(p.nodes)
-		if p.nodes[idx].proxy.healthy.Load() {
+		if p.nodes[idx].proxy.available() {
 			return idx
 		}
 	}
@@ -154,21 +169,38 @@ func (c *anonymousCursor) Next() *anonymousNode {
 		c.used = make([]bool, n)
 	}
 	now := time.Now().UnixNano()
-	for c.offset < n {
-		idx := (c.start + c.offset) % n
-		c.offset++
-		node := c.pool.nodes[idx]
-		if node.proxy.pool || (!c.used[idx] && node.proxy.healthy.Load() && node.cooldownUntil.Load() <= now) {
+	// Rotating proxies are the preferred route: they can renew their exit, and
+	// the static entries exist to carry traffic only while that happens. Every
+	// entry is still visited at most once per cursor, so a failing rotation does
+	// not starve the static fallback.
+	for pass := 0; pass < 2; pass++ {
+		// Each pass scans the whole ring once from the cursor start; the second
+		// pass exists to reach static entries the first pass skipped.
+		for step := 0; step < n; step++ {
+			idx := (c.start + step) % n
+			node := c.pool.nodes[idx]
+			if c.used[idx] || !node.proxy.available() {
+				continue
+			}
+			// Pass 0 takes rotating proxies only; pass 1 takes the rest.
+			if node.proxy.isRotating() != (pass == 0) {
+				continue
+			}
+			if !node.proxy.pool && node.cooldownUntil.Load() > now {
+				continue
+			}
 			c.used[idx] = true
 			return node
 		}
 	}
 	if c.pool.hasPool {
+		// Rotating pool entries may be reused: each attempt opens a fresh
+		// connection and therefore a new exit IP.
 		for range n {
 			idx := (c.start + c.offset) % n
 			c.offset++
 			node := c.pool.nodes[idx]
-			if node.proxy.pool {
+			if node.proxy.pool && node.proxy.available() {
 				return node
 			}
 		}
@@ -182,7 +214,12 @@ func (c *anonymousCursor) Next() *anonymousNode {
 			continue
 		}
 		node := c.pool.nodes[idx]
-		healthy := node.proxy.healthy.Load()
+		// Last resort: an entry being renewed must still stay out of service,
+		// otherwise the static fallback never gets the chance to serve.
+		healthy := node.proxy.available()
+		if !healthy {
+			continue
+		}
 		until := node.cooldownUntil.Load()
 		if choice < 0 || (healthy && !choiceHealthy) || (healthy == choiceHealthy && until < earliest) {
 			choice, earliest, choiceHealthy = idx, until, healthy
@@ -252,6 +289,30 @@ func (p *anonymousPool) MarkFailure(node *anonymousNode, resp *http.Response, er
 	node.cooldownUntil.Store(time.Now().Add(delay).UnixNano())
 }
 
+// RotatingFirst orders the pool so rotating proxies come first and static
+// proxies last. Selection (roundrobin, random, sticky, cursors) then naturally
+// prefers a rotating exit and keeps the static entries for fallback.
+func (p *transportPool) RotatingFirst(isRotating func(name string) bool) {
+	if p == nil {
+		return
+	}
+	rotating := make([]*proxyTransport, 0, len(p.items))
+	static := make([]*proxyTransport, 0, len(p.items))
+	for _, item := range p.items {
+		if item.pool || isRotating(item.name) {
+			item.rotating.Store(true)
+			rotating = append(rotating, item)
+			continue
+		}
+		static = append(static, item)
+	}
+	ordered := append(rotating, static...)
+	for i, item := range ordered {
+		item.index = i
+	}
+	p.items = ordered
+}
+
 // stickyProxy returns the pinned proxy for sticky mode, skipping to the
 // next healthy one when the pinned proxy is down. It never marks anything:
 // health is owned by syncProxyResult/CheckHealth.
@@ -262,7 +323,7 @@ func (p *transportPool) stickyProxy() *proxyTransport {
 	pinned := int(p.sticky.Load() % uint64(len(p.items)))
 	for offset := 0; offset < len(p.items); offset++ {
 		candidate := p.items[(pinned+offset)%len(p.items)]
-		if candidate.healthy.Load() {
+		if candidate.available() {
 			return candidate
 		}
 	}
@@ -293,7 +354,7 @@ func (p *transportPool) pickRoundRobinHealthy() *proxyTransport {
 	start := int(p.roundRobin.Add(1) - 1)
 	for offset := range len(p.items) {
 		candidate := p.items[(start+offset)%len(p.items)]
-		if candidate.healthy.Load() {
+		if candidate.available() {
 			return candidate
 		}
 	}
@@ -307,7 +368,7 @@ func (p *transportPool) pickRandomHealthy() *proxyTransport {
 	start := rand.IntN(len(p.items))
 	for offset := range len(p.items) {
 		candidate := p.items[(start+offset)%len(p.items)]
-		if candidate.healthy.Load() {
+		if candidate.available() {
 			return candidate
 		}
 	}
@@ -316,7 +377,7 @@ func (p *transportPool) pickRandomHealthy() *proxyTransport {
 
 func (p *transportPool) hasHealthy() bool {
 	for _, proxy := range p.items {
-		if proxy.healthy.Load() {
+		if proxy.available() {
 			return true
 		}
 	}

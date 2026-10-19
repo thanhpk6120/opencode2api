@@ -374,6 +374,18 @@ The Proxies page shows each link and offers **Set rotate link** and **Rotate IP*
 
 A failed-range memory keys on the exit network (`/24` for IPv4, `/48` for IPv6) read from the proxy's own egress. When a rotation lands on a range that already failed, the gateway rotates again, but never faster than `min_interval_seconds`, up to five attempts. The Proxies page exposes the same settings — source mode, the three timers, and the cache size — through `PUT /api/proxies/settings`.
 
+#### Rotating-first routing with static fallback
+
+When the pool contains both kinds of proxy, the rotating ones are ordered first and every cursor prefers them. A rotating proxy that fails an AI-model call is suspended (`refreshing`) instead of being retried, so the static proxies serve traffic while its exit is renewed in the background:
+
+1. the rotate link is called;
+2. the new exit range is read and checked against the failed-range cache;
+3. a real, minimal model call is made through the new exit;
+4. only when that call succeeds is the rotating proxy returned to service, and the static proxies go back to being pure fallback.
+
+If no exit passes the probe, the rotating proxy stays out and the static proxies keep serving. `auto_rotate` controls only whether this recovery starts automatically: with it off, the proxy is still suspended and waits for the next forced rotation (`max_interval_seconds`).
+
+
 ### Timeouts and connection pools
 
 | Field                                   | Default | Meaning                                                |

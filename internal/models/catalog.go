@@ -347,6 +347,12 @@ func (c *Catalog) RouteForTier(model string, tier config.Tier, hasZenKeys, hasGo
 	}, nil
 }
 
+// EligibleForAnonymous reports whether the keyless public credential may
+// serve this model.
+func (c *Catalog) EligibleForAnonymous(model string) bool {
+	return c.anonymousDecision(model).Allowed
+}
+
 func (c *Catalog) anonymousDecision(model string) AnonymousDecision {
 	if c.pricing != nil {
 		return c.pricing.Decide(model)

@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"opencode2api/internal/config"
+	"opencode2api/internal/identity"
+	"opencode2api/internal/models"
+	wire "opencode2api/internal/protocol"
 )
 
 // exitIPProbeURL returns the caller's exit address. It is the same endpoint the
@@ -22,9 +25,17 @@ const exitIPProbeURL = proxyHealthCheckURL
 // known-bad" loop. Each pass is spaced by the configured minimum interval.
 const rotateAttempts = 5
 
-// proxyRotator changes the exit IP of rotating proxies. It reacts to failed AI
-// model calls, forces a rotation at the configured maximum interval, and skips
-// exit ranges that already failed.
+// probeTimeout bounds one AI-model call used to decide whether a renewed exit
+// actually works.
+const probeTimeout = 60 * time.Second
+
+// proxyRotator changes the exit IP of rotating proxies.
+//
+// The rotating proxies are tried first. When one fails an AI-model call it is
+// taken out of service (refreshing) so the static proxies carry traffic, while
+// the rotator renews its exit in the background and keeps calling a real model
+// until one exit succeeds. Only then does the rotating proxy come back and the
+// static entries return to being pure fallback.
 type proxyRotator struct {
 	gateway *Gateway
 	cfg     config.RotatingProxyConfig
@@ -48,14 +59,14 @@ func newProxyRotator(g *Gateway, cfg config.RotatingProxyConfig) *proxyRotator {
 	}
 }
 
-// RotatingProxies lists the transports that can change their exit IP.
+// rotatingProxies lists the transports that can change their exit IP.
 func (g *Gateway) rotatingProxies() []*proxyTransport {
 	if g == nil || g.transports == nil {
 		return nil
 	}
 	out := make([]*proxyTransport, 0, len(g.transports.items))
 	for _, proxy := range g.transports.items {
-		if g.cfg.ProxyRotateLink(config.Fingerprint(proxy.name)) != "" {
+		if proxy.isRotating() && g.cfg.ProxyRotateLink(config.Fingerprint(proxy.name)) != "" {
 			out = append(out, proxy)
 		}
 	}
@@ -82,41 +93,45 @@ func (g *Gateway) StartProxyRotation(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				g.rotator.rotateDue(ctx)
+				g.rotator.rotateDue()
 			}
 		}
 	}()
 }
 
-// ObserveFailure is called for every failed AI-model attempt. A failure on a
-// rotating proxy marks the current exit range bad and, when the minimum
-// interval allows it, rotates to a fresh exit.
+// observeRotatingFailure is called for every failed AI-model attempt. A failure
+// on a rotating proxy suspends it immediately (so traffic falls back to the
+// static proxies), remembers the failed exit range, and renews the exit in the
+// background.
 func (g *Gateway) observeRotatingFailure(proxy *proxyTransport) {
-	if g == nil || g.rotator == nil || proxy == nil || !g.cfg.Rotating.AutoRotate {
+	if g == nil || !proxy.isRotating() || g.cfg.ProxyRotateLink(config.Fingerprint(proxy.name)) == "" {
 		return
 	}
-	if g.cfg.ProxyRotateLink(config.Fingerprint(proxy.name)) == "" {
+	// Without auto_rotate the proxy is still suspended: retrying the same dead
+	// exit would only burn attempts. Recovery then waits for the next forced
+	// rotation instead.
+	proxy.refreshing.Store(true)
+	if !g.cfg.Rotating.AutoRotate {
 		return
 	}
 	go func() {
 		// Remember the exit range that failed before changing it, so a rotation
 		// that lands back on it is treated as a bad draw.
 		g.rotator.noteFailureRange(proxy)
-		g.rotator.rotate(proxy, "upstream_failure")
+		g.rotator.renew(proxy, "upstream_failure")
 	}()
 }
 
-// rotateDue rotates every rotating proxy whose last rotation is older than the
+// rotateDue renews every rotating proxy whose last rotation is older than the
 // maximum interval.
-func (r *proxyRotator) rotateDue(ctx context.Context) {
+func (r *proxyRotator) rotateDue() {
 	for _, proxy := range r.gateway.rotatingProxies() {
-		if ctx.Err() != nil {
-			return
-		}
 		if !r.due(proxy, time.Duration(r.cfg.MaxIntervalSeconds)*time.Second) {
 			continue
 		}
-		go r.rotate(proxy, "max_interval")
+		// A forced rotation also restores a proxy suspended without auto_rotate.
+		proxy.refreshing.Store(true)
+		go r.renew(proxy, "max_interval")
 	}
 }
 
@@ -126,31 +141,21 @@ func (r *proxyRotator) due(proxy *proxyTransport, interval time.Duration) bool {
 	return time.Since(r.last[config.Fingerprint(proxy.name)]) >= interval
 }
 
-// rotate runs the rotate link, then re-rotates while the new exit range is
-// already known to be bad. Rotations are serialized per proxy, so a burst of
-// failures produces a single rotation.
-func (r *proxyRotator) rotate(proxy *proxyTransport, reason string) {
+// renew runs the rotate link and then keeps calling a real model through the
+// new exit until one attempt succeeds. The proxy is returned to service only
+// when that probe passes; on failure it stays suspended so the static proxies
+// keep serving.
+func (r *proxyRotator) renew(proxy *proxyTransport, reason string) {
 	id := config.Fingerprint(proxy.name)
 	link := r.gateway.cfg.ProxyRotateLink(id)
 	if link == "" {
+		proxy.refreshing.Store(false)
 		return
 	}
-	r.mu.Lock()
-	if r.inflight[id] {
-		r.mu.Unlock()
+	if !r.claim(proxy) {
 		return
 	}
-	if elapsed := time.Since(r.last[id]); elapsed < time.Duration(r.cfg.MinIntervalSeconds)*time.Second {
-		r.mu.Unlock()
-		return
-	}
-	r.inflight[id] = true
-	r.mu.Unlock()
-	defer func() {
-		r.mu.Lock()
-		delete(r.inflight, id)
-		r.mu.Unlock()
-	}()
+	defer r.release(proxy)
 
 	for attempt := range rotateAttempts {
 		if attempt > 0 {
@@ -162,19 +167,20 @@ func (r *proxyRotator) rotate(proxy *proxyTransport, reason string) {
 		if err != nil {
 			// Stamp the attempt so a failing endpoint is retried on the same
 			// minimum-interval schedule instead of once per failed request.
-			r.mu.Lock()
-			r.last[id] = time.Now()
-			r.mu.Unlock()
+			r.stamp(proxy)
 			r.logger.Warn("proxy rotation failed", "component", "proxy", "event", "proxy_rotate_failed", "proxy", config.RedactURL(proxy.name), "reason", reason, "error", err)
 			return
 		}
-		r.mu.Lock()
-		r.last[id] = time.Now()
-		r.mu.Unlock()
+		r.stamp(proxy)
 		r.gateway.resetProxyRoute(id)
+
 		rangeKey := r.probeExitRange(proxy)
 		if rangeKey == "" {
-			r.logger.Info("proxy exit rotated", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name), "reason", reason, "status", status)
+			// The exit address could not be read, so there is nothing to judge
+			// the new exit against. Accept the rotation instead of looping on a
+			// probe that cannot tell a good exit from a bad one.
+			r.logger.Info("proxy exit rotated (exit range unknown)", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name), "reason", reason, "status", status)
+			r.resume(proxy, reason, "")
 			return
 		}
 		r.mu.Lock()
@@ -182,15 +188,23 @@ func (r *proxyRotator) rotate(proxy *proxyTransport, reason string) {
 		bad := r.isBadLocked(rangeKey)
 		r.mu.Unlock()
 		r.logger.Info("proxy exit rotated", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name), "reason", reason, "status", status, "exit_range", rangeKey, "known_bad", bad)
-		if !bad {
+
+		if bad {
+			// Drawing a known-bad exit again is not worth an AI call.
+			continue
+		}
+		if r.probeModelCall(proxy) {
+			r.resume(proxy, reason, rangeKey)
+			r.logger.Info("rotating proxy back in service", "component", "proxy", "event", "rotate_probe_succeeded", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey, "attempt", attempt+1)
 			return
 		}
+		r.logger.Warn("rotated exit still failed the model probe", "component", "proxy", "event", "rotate_probe_failed", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey, "attempt", attempt+1)
 	}
-	r.logger.Warn("proxy kept landing on known-bad exit ranges", "component", "proxy", "event", "proxy_rotate_exhausted", "proxy", config.RedactURL(proxy.name), "reason", reason)
+	r.logger.Warn("proxy kept landing on unusable exits; staying on the static fallback", "component", "proxy", "event", "proxy_rotate_exhausted", "proxy", config.RedactURL(proxy.name), "reason", reason)
 }
 
 // noteFailureRange records the exit range of a proxy that just failed an AI
-// model call. It is separate from rotate() so the failure is remembered even
+// model call. It is separate from renew() so the failure is remembered even
 // when the minimum interval blocks an immediate rotation.
 func (r *proxyRotator) noteFailureRange(proxy *proxyTransport) {
 	id := config.Fingerprint(proxy.name)
@@ -242,6 +256,127 @@ func (r *proxyRotator) isBadLocked(rangeKey string) bool {
 		}
 	}
 	return false
+}
+
+// claim reserves a rotation slot for one proxy. It refuses while another
+// rotation is running or before the minimum interval elapsed, which is what
+// keeps a burst of failures from hammering the provider's rotate endpoint.
+func (r *proxyRotator) claim(proxy *proxyTransport) bool {
+	if proxy == nil {
+		return false
+	}
+	id := config.Fingerprint(proxy.name)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.inflight[id] {
+		return false
+	}
+	if elapsed := time.Since(r.last[id]); elapsed < time.Duration(r.cfg.MinIntervalSeconds)*time.Second {
+		return false
+	}
+	r.inflight[id] = true
+	return true
+}
+
+func (r *proxyRotator) release(proxy *proxyTransport) {
+	if proxy == nil {
+		return
+	}
+	id := config.Fingerprint(proxy.name)
+	r.mu.Lock()
+	delete(r.inflight, id)
+	r.mu.Unlock()
+}
+
+// stamp records that a rotation was attempted now, so a failing endpoint is
+// throttled on the same minimum-interval schedule.
+func (r *proxyRotator) stamp(proxy *proxyTransport) {
+	if proxy == nil {
+		return
+	}
+	id := config.Fingerprint(proxy.name)
+	r.mu.Lock()
+	r.last[id] = time.Now()
+	r.mu.Unlock()
+}
+
+// resume returns a rotating proxy to service and records the exit it uses.
+func (r *proxyRotator) resume(proxy *proxyTransport, reason, rangeKey string) {
+	proxy.refreshing.Store(false)
+	r.gateway.restoreProxy(proxy)
+	r.logger.Info("rotating proxy back in service", "component", "proxy", "event", "proxy_resumed", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey)
+}
+
+// probeModelCall performs a real, minimal AI-model call through the proxy. A
+// renewed exit is only accepted when the upstream answers it, which is what the
+// operator asked for: keep rotating until an exit can actually serve a model.
+func (r *proxyRotator) probeModelCall(proxy *proxyTransport) bool {
+	g := r.gateway
+	if g == nil || proxy == nil || proxy.client == nil || g.catalog == nil {
+		return false
+	}
+	model := g.rotationProbeModel()
+	if model == "" {
+		// No model to probe with: fall back to accepting a reachable exit so a
+		// misconfigured catalog cannot strand the proxy forever.
+		return r.probeExitRange(proxy) != ""
+	}
+	route, err := g.catalog.Route(model, g.zenNodes.Len() > 0, g.goNodes.Len() > 0, g.cfg.Anonymous)
+	if err != nil {
+		return false
+	}
+	protocol := route.ProtocolFor(config.TierZen)
+	if protocol == "" {
+		protocol = route.Protocol
+	}
+	body, err := probePayload(model, protocol, "", isLegacyZenUpstream(models.LegacyZenBase))
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	ids := identity.RequestIDs{Request: identity.RandomID("req", 16), Session: identity.CanonicalSessionID("rotation:" + config.Fingerprint(proxy.name)), Project: "opencode2api:default-project"}
+	req, err := newUpstreamRequest(ctx, models.LegacyZenBase, protocol, body, ids, anonymousZenKey)
+	if err != nil {
+		return false
+	}
+	req.Close = true
+	resp, err := proxy.client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	if resp.StatusCode/100 != 2 {
+		return false
+	}
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") && protocol != wire.SystemOne {
+		if _, err := wire.CollapseStream(resp.Body, protocol, model); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// rotationProbeModel picks a free model already known to work with the public
+// credential, so the probe measures the proxy rather than the model catalogue.
+func (g *Gateway) rotationProbeModel() string {
+	if g == nil || g.catalog == nil {
+		return ""
+	}
+	for _, model := range g.catalog.List() {
+		if !g.catalog.IsFreeModel(model) {
+			continue
+		}
+		if !g.catalog.EligibleForAnonymous(model) {
+			continue
+		}
+		return model
+	}
+	return ""
 }
 
 // probeExitRange reads the current exit address through the proxy and reduces

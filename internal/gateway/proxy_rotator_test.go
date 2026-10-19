@@ -54,12 +54,6 @@ func TestFailedIPCacheIsBounded(t *testing.T) {
 // The minimum interval blocks a burst of failures from calling the rotate link
 // repeatedly.
 func TestRotationRespectsMinimumInterval(t *testing.T) {
-	var calls atomic.Int32
-	link := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-	}))
-	defer link.Close()
-
 	name := "http://127.0.0.1:7890"
 	pool, err := newTransportPool([]string{name}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
 	if err != nil {
@@ -67,27 +61,26 @@ func TestRotationRespectsMinimumInterval(t *testing.T) {
 	}
 	cfg := config.Config{
 		Proxies:          []string{name},
-		ProxyRotateLinks: map[string]string{config.Fingerprint(name): link.URL},
+		ProxyRotateLinks: map[string]string{config.Fingerprint(name): "https://p.example/rotate"},
 		Rotating:         config.RotatingProxyConfig{AutoRotate: true, MinIntervalSeconds: 3600, FailedIPCacheSize: 10},
 	}
 	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger()}
 	g.rotator = newProxyRotator(g, cfg.Rotating)
 
 	proxy := pool.items[0]
-	g.rotator.rotate(proxy, "test")
-	first := calls.Load()
-	if first != 1 {
-		t.Fatalf("rotate link called %d times, want 1", first)
+	if !g.rotator.claim(proxy) {
+		t.Fatal("first rotation was refused")
 	}
-	g.rotator.rotate(proxy, "test")
-	if got := calls.Load(); got != first {
-		t.Fatalf("rotation bypassed the minimum interval: %d calls", got)
+	g.rotator.release(proxy)
+	g.rotator.stamp(proxy)
+	if g.rotator.claim(proxy) {
+		t.Fatal("rotation bypassed the minimum interval")
 	}
 }
 
-// Auto-rotation is opt-in: without it, a failed model call must not touch the
-// rotate link.
-func TestObserveRotatingFailureRequiresOptIn(t *testing.T) {
+// A failed AI call suspends the rotating proxy immediately, so the static
+// fallback takes over even while auto_rotate is off.
+func TestRotatingFailureSuspendsProxy(t *testing.T) {
 	var calls atomic.Int32
 	link := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
@@ -99,6 +92,7 @@ func TestObserveRotatingFailureRequiresOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build pool: %v", err)
 	}
+	pool.items[0].rotating.Store(true)
 	cfg := config.Config{
 		Proxies:          []string{name},
 		ProxyRotateLinks: map[string]string{config.Fingerprint(name): link.URL},
@@ -108,26 +102,140 @@ func TestObserveRotatingFailureRequiresOptIn(t *testing.T) {
 	g.rotator = newProxyRotator(g, cfg.Rotating)
 
 	g.observeRotatingFailure(pool.items[0])
-	time.Sleep(200 * time.Millisecond)
+	if !pool.items[0].refreshing.Load() {
+		t.Fatal("failed rotating proxy was not suspended")
+	}
+	if pool.items[0].available() {
+		t.Fatal("suspended proxy still reports available")
+	}
+	time.Sleep(150 * time.Millisecond)
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("auto_rotate=false still called the rotate link %d times", got)
 	}
 }
 
-func TestRotatingProxiesSelectsOnlyLinkedEntries(t *testing.T) {
-	pool, err := newTransportPool([]string{"direct", "http://127.0.0.1:7890"}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+// A renewed proxy only comes back after its AI-model probe succeeds.
+func TestRenewRestoresProxyAfterSuccessfulProbe(t *testing.T) {
+	name := "http://127.0.0.1:7890#pool"
+	pool, err := newTransportPool([]string{name}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
 	if err != nil {
 		t.Fatalf("build pool: %v", err)
 	}
-	linked := "http://127.0.0.1:7890"
-	g := &Gateway{
-		cfg:        config.Config{ProxyRotateLinks: map[string]string{config.Fingerprint(linked): "https://p.example/rotate"}},
-		transports: pool,
-		logger:     testLogger(),
+	proxy := pool.items[0]
+	proxy.rotating.Store(true)
+	proxy.refreshing.Store(true)
+
+	proxy.client.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/plain"}},
+			Body:       http.NoBody,
+		}, nil
+	})
+	cfg := config.Config{
+		Proxies:          []string{name},
+		ProxyRotateLinks: map[string]string{config.Fingerprint(name): "https://p.example/rotate"},
+		Rotating:         config.RotatingProxyConfig{AutoRotate: true, MinIntervalSeconds: 1, FailedIPCacheSize: 10},
 	}
+	// A catalog is required for the model probe; without one the renew path
+	// accepts the rotation on reachability alone.
+	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger()}
+	g.rotator = newProxyRotator(g, cfg.Rotating)
+	g.rotator.resume(proxy, "test", "")
+	if !proxy.available() {
+		t.Fatal("resume did not restore the proxy")
+	}
+}
+
+func TestRotatingProxiesSelectsOnlyLinkedEntries(t *testing.T) {
+	linked := "http://127.0.0.1:7890"
+	cfg := config.Config{ProxyRotateLinks: map[string]string{config.Fingerprint(linked): "https://p.example/rotate"}}
+	pool, err := newTransportPool([]string{"direct", linked}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	pool.RotatingFirst(func(name string) bool { return cfg.ProxyRotateLink(config.Fingerprint(name)) != "" })
+	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger()}
 	got := g.rotatingProxies()
 	if len(got) != 1 || got[0].name != linked {
 		t.Fatalf("rotatingProxies = %v", got)
+	}
+}
+
+// Rotating proxies must be tried first, with the static ones kept as fallback.
+func TestRotatingFirstOrdersPool(t *testing.T) {
+	rotating := "http://127.0.0.1:7891#pool"
+	linked := "http://127.0.0.1:7892"
+	static := "http://127.0.0.1:7893"
+	pool, err := newTransportPool([]string{"direct", static, linked, rotating}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	cfg := config.Config{ProxyRotateLinks: map[string]string{config.Fingerprint(linked): "https://p.example/rotate"}}
+	pool.RotatingFirst(func(name string) bool { return cfg.ProxyRotateLink(config.Fingerprint(name)) != "" })
+
+	names := make([]string, 0, len(pool.items))
+	for _, item := range pool.items {
+		names = append(names, item.name)
+	}
+	if len(names) != 4 {
+		t.Fatalf("pool lost entries: %v", names)
+	}
+	if !pool.items[0].isRotating() || !pool.items[1].isRotating() {
+		t.Fatalf("rotating proxies are not first: %v", names)
+	}
+	if pool.items[2].isRotating() || pool.items[3].isRotating() {
+		t.Fatalf("static proxies are not last: %v", names)
+	}
+	for i, item := range pool.items {
+		if item.index != i {
+			t.Fatalf("index not renumbered: %v at %d", names, i)
+		}
+	}
+}
+
+// A rotating proxy being renewed steps aside so the static fallback serves
+// traffic. This is the core of the rotating-first design.
+func TestRefreshingRotatingProxyYieldsToStatic(t *testing.T) {
+	rotating := "http://127.0.0.1:7891#pool"
+	static := "http://127.0.0.1:7893"
+	pool, err := newTransportPool([]string{rotating, static}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	cfg := config.Config{ProxyRotateLinks: map[string]string{config.Fingerprint(rotating): "https://p.example/rotate"}}
+	pool.RotatingFirst(func(name string) bool { return cfg.ProxyRotateLink(config.Fingerprint(name)) != "" })
+	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger(), anonymous: newAnonymousPool(true, pool, 0, config.ProxyModeRoundRobin)}
+
+	rot := pool.items[0]
+	// First pick serves the rotating proxy.
+	cursor := g.anonymous.CursorFor("session-1")
+	first := cursor.Next()
+	if first == nil || first.proxy.name != rotating {
+		t.Fatalf("first pick = %v, want the rotating proxy", first)
+	}
+
+	rot.refreshing.Store(true)
+	// Every pick now has to come from the static proxy, never from the renewing
+	// one, including through the #pool wrap-around branch.
+	for range 4 {
+		cursor = g.anonymous.CursorFor("session-1")
+		for range 4 {
+			node := cursor.Next()
+			if node == nil {
+				break
+			}
+			if node.proxy.name == rotating {
+				t.Fatal("cursor kept serving a proxy that is being renewed")
+			}
+		}
+	}
+
+	// Once the renewal finishes the rotating proxy is preferred again.
+	rot.refreshing.Store(false)
+	cursor = g.anonymous.CursorFor("session-1")
+	if node := cursor.Next(); node == nil || node.proxy.name != rotating {
+		t.Fatalf("rotating proxy was not restored: %v", node)
 	}
 }
 
@@ -155,3 +263,7 @@ func TestKeyWithoutTransportReportsProxyError(t *testing.T) {
 		t.Fatalf("empty transport pool returned a proxy: %v", got)
 	}
 }
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

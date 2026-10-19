@@ -75,6 +75,11 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*G
 	if err != nil {
 		return nil, err
 	}
+	// Rotating proxies are tried first: they can renew their exit, so a static
+	// proxy is only needed while an exit is being replaced.
+	transports.RotatingFirst(func(name string) bool {
+		return cfg.ProxyRotateLink(config.Fingerprint(name)) != ""
+	})
 	cooldown := time.Duration(cfg.Performance.FailureCooldownSeconds) * time.Second
 	zenNodes, err := newNodePool(cfg.ZenKeys, transports, cooldown, mode)
 	if err != nil {
