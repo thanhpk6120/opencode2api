@@ -341,6 +341,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 				req.Close = true
 			}
 			setRequestCredential(ctx, config.TierZen, "anonymous", "anonymous", true, node.proxy)
+			node.proxy.touch()
 			started := time.Now()
 			resp, err := doInferenceAttempt(node.proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second, g.attemptTimeout)
 			duration := time.Since(started)
@@ -931,6 +932,7 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 	if proxy.pool {
 		req.Close = true
 	}
+	proxy.touch()
 	started := time.Now()
 	resp, err := doInferenceAttempt(proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second, g.attemptTimeout)
 	duration := time.Since(started)
@@ -1007,6 +1009,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		}
 		keyID := config.KeyDisplayID(node.key)
 		setRequestCredential(ctx, route.Tier, keyID, "key", false, proxy)
+		proxy.touch()
 		attemptStarted := time.Now()
 		resp, err := doInferenceAttempt(proxy.client, req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second, g.attemptTimeout)
 		attemptDuration := time.Since(attemptStarted)

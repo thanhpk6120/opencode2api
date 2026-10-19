@@ -36,6 +36,27 @@ type proxyTransport struct {
 	// refreshing is set while a rotating proxy is being renewed. Traffic skips
 	// it and falls back to the static proxies until a working exit is found.
 	refreshing atomic.Bool
+	// lastUsed is the UnixNano of the most recent attempt routed through this
+	// proxy, so the dashboard can show which egress traffic is actually using.
+	lastUsed atomic.Int64
+}
+
+// touch records that an attempt is being routed through this proxy.
+func (p *proxyTransport) touch() {
+	if p != nil {
+		p.lastUsed.Store(time.Now().UnixNano())
+	}
+}
+
+// lastUsedAt reports the last attempt time, or the zero time if never used.
+func (p *proxyTransport) lastUsedAt() time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	if ns := p.lastUsed.Load(); ns > 0 {
+		return time.Unix(0, ns)
+	}
+	return time.Time{}
 }
 
 // isRotating reports whether this proxy can change its exit IP.

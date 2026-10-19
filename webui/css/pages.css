@@ -384,3 +384,12 @@
   font-size: var(--fs-xs);
   word-break: break-all;
 }
+
+/* Overview: the proxy currently carrying traffic */
+#proxy-table tr.is-current td {
+  background: color-mix(in srgb, var(--accent, #4c9aff) 10%, transparent);
+}
+#proxy-table .tag-current {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+}

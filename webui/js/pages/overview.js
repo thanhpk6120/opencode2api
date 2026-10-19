@@ -58,13 +58,39 @@ function renderChecklist() {
   });
 }
 
+// newestProxy returns the proxy with the most recent attempt. The dashboard
+// highlights it: with round-robin/random selection this is the egress that
+// client traffic is actually leaving through right now.
+function newestProxy(list) {
+  let best = null;
+  list.forEach((proxy) => {
+    if (!proxy.last_used) return;
+    if (!best || new Date(proxy.last_used) > new Date(best.last_used)) best = proxy;
+  });
+  return best;
+}
+
 function renderResources(resources) {
   const proxies = $("#proxy-table");
   proxies.replaceChildren();
-  (resources.proxies || []).forEach((proxy) => {
+  const list = resources.proxies || [];
+  const current = newestProxy(list);
+  const currentLabel = $("#proxy-current");
+  if (currentLabel) {
+    currentLabel.textContent = current
+      ? t(`当前出口：${current.address}`, "overview.proxy.current", current.address)
+      : t("尚未有流量经过任何代理", "overview.proxy.current.empty");
+  }
+  list.forEach((proxy) => {
+    const inUse = current && proxy.id === current.id;
     proxies.append(
-      el("tr", {}, [
-        el("td", { text: proxy.address }),
+      el("tr", { class: inUse ? "is-current" : "" }, [
+        el("td", {}, [
+          el("span", { text: proxy.address }),
+          ...(inUse
+            ? [el("span", { class: "status ok tag-current", text: t("当前", "overview.proxy.inuse") })]
+            : []),
+        ]),
         el("td", {
           class: `status ${proxy.healthy ? "ok" : "bad"}`,
           text: proxy.healthy ? t("正常", "state.healthy") : t("不可用", "state.unavailable"),
@@ -74,10 +100,14 @@ function renderResources(resources) {
             proxy.anonymous ? t("开", "common.on") : t("关", "common.off")
           }`,
         }),
+        el("td", {
+          class: "section-caption mono",
+          text: proxy.last_used ? timeOnly(proxy.last_used) : t("从未使用", "overview.proxy.never"),
+        }),
       ]),
     );
   });
-  if (!proxies.children.length) emptyRow(proxies, 3);
+  if (!proxies.children.length) emptyRow(proxies, 4);
   const keys = $("#key-table");
   keys.replaceChildren();
   if (resources.anonymous) {

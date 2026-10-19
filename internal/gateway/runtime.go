@@ -315,6 +315,9 @@ type ProxyStatus struct {
 	ZenKeys   int    `json:"zen_keys"`
 	GoKeys    int    `json:"go_keys"`
 	Anonymous bool   `json:"anonymous"`
+	// LastUsed is the newest attempt routed through this proxy. The dashboard
+	// marks the newest non-zero value as the proxy currently in use.
+	LastUsed *time.Time `json:"last_used,omitempty"`
 }
 
 func (m *RuntimeManager) Resources() ResourceSnapshot {
@@ -336,6 +339,9 @@ func (m *RuntimeManager) Resources() ResourceSnapshot {
 	gateway.goNodes.bindingsMu.Unlock()
 	for _, proxy := range gateway.transports.items {
 		status := ProxyStatus{ID: config.Fingerprint(proxy.name), Index: proxy.index, Address: config.RedactURL(proxy.name), Healthy: proxy.healthy.Load(), Checking: proxy.checking.Load(), Anonymous: gateway.cfg.Anonymous}
+		if used := proxy.lastUsedAt(); !used.IsZero() {
+			status.LastUsed = &used
+		}
 		if gateway.transports != nil && gateway.transports.mode != "" {
 			status.ZenKeys = len(gateway.cfg.ZenKeys)
 			status.GoKeys = len(gateway.cfg.GoKeys)
