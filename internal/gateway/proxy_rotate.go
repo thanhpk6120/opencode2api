@@ -79,6 +79,12 @@ func (g *Gateway) resetProxyRoute(id string) {
 			continue
 		}
 		proxy.refreshing.Store(false)
+		// Close kept-alive tunnels before the next request: a non-#pool entry
+		// would otherwise keep using the old CONNECT tunnel and therefore the old
+		// exit IP, making the manual rotation look successful but change nothing.
+		if proxy.client != nil {
+			proxy.client.CloseIdleConnections()
+		}
 		g.resetProxyHealth(proxy)
 		return
 	}

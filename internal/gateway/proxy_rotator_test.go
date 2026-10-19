@@ -11,6 +11,8 @@ import (
 	"opencode2api/internal/config"
 	"opencode2api/internal/identity"
 	"opencode2api/internal/models"
+	modelcatalog "opencode2api/internal/models"
+	wire "opencode2api/internal/protocol"
 )
 
 func TestExitRangeGroupsBySubnet(t *testing.T) {
@@ -470,5 +472,55 @@ func TestHasHealthyFalseWhenEveryProxyUnhealthy(t *testing.T) {
 	// Pool rỗng thì luôn false.
 	if (&transportPool{}).hasHealthy() {
 		t.Fatal("pool rỗng báo còn đường thoát")
+	}
+}
+
+// Không đọc được IP ra VÀ không probe được model ⇒ chưa chứng minh được exit,
+// proxy phải ở ngoài phục vụ để proxy tĩnh gánh (không resume sớm).
+func TestRenewKeepsSuspendedWhenNothingCanBeVerified(t *testing.T) {
+	var calls atomic.Int32
+	link := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+	}))
+	defer link.Close()
+
+	name := "http://127.0.0.1:9#pool"
+	pool, err := newTransportPool([]string{name}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	proxy := pool.items[0]
+	proxy.rotating.Store(true)
+	proxy.refreshing.Store(true)
+	// Gateway không có catalog ⇒ probeModelCall trả feasible=false.
+	g := &Gateway{cfg: config.Config{
+		Proxies:          []string{name},
+		ProxyRotateLinks: map[string]string{config.Fingerprint(name): link.URL},
+		Anonymous:        true,
+		Rotating:         config.RotatingProxyConfig{AutoRotate: true, MinIntervalSeconds: 1, FailedIPCacheSize: 10},
+	}, transports: pool, logger: testLogger()}
+	g.rotator = newProxyRotator(g, g.cfg.Rotating)
+
+	g.rotator.renew(proxy, "test")
+	if calls.Load() == 0 {
+		t.Fatal("rotate link không được gọi")
+	}
+	if !proxy.refreshing.Load() {
+		t.Fatal("proxy chưa được chứng minh vẫn bị đưa về phục vụ")
+	}
+	if proxy.available() {
+		t.Fatal("proxy chưa chứng minh lại available")
+	}
+}
+
+// Probe phải dùng được model free kể cả khi mọi model đang bị đánh dấu là không
+// khả dụng sau một loạt 403 — exit mới chưa được thử thì chưa kết luận được.
+func TestRotationProbeModelFallsBackWhenFreeModelsUnavailable(t *testing.T) {
+	catalog := modelcatalog.NewCatalog(config.TierZen, nil)
+	catalog.ReplaceWithCapabilities([]string{"deepseek-v4.1-flash-free"}, nil,
+		map[config.Tier]map[string]wire.Protocol{config.TierZen: {"deepseek-v4.1-flash-free": wire.Chat}}, nil, nil)
+	g := &Gateway{cfg: config.Config{Anonymous: true}, catalog: catalog, zenNodes: &nodePool{}, goNodes: &nodePool{}}
+	if got := g.rotationProbeModel(); got != "deepseek-v4.1-flash-free" {
+		t.Fatalf("rotationProbeModel = %q", got)
 	}
 }

@@ -13,7 +13,6 @@ import (
 
 	"opencode2api/internal/config"
 	"opencode2api/internal/identity"
-	"opencode2api/internal/models"
 	wire "opencode2api/internal/protocol"
 )
 
@@ -182,43 +181,43 @@ func (r *proxyRotator) renew(proxy *proxyTransport, reason string) {
 		r.gateway.resetProxyHealth(proxy)
 
 		rangeKey := r.probeExitRange(proxy)
-		if rangeKey == "" {
-			// The exit address could not be read. That says nothing about whether
-			// the exit works, so fall through to the model probe rather than
-			// assuming the rotation succeeded.
-			r.logger.Info("proxy exit rotated (exit range unknown)", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name), "reason", reason, "status", status)
-			if ok, feasible := r.probeModelCall(proxy); feasible && !ok {
-				r.logger.Warn("rotated exit failed the model probe", "component", "proxy", "event", "rotate_probe_failed", "proxy", config.RedactURL(proxy.name), "reason", reason, "attempt", attempt+1)
+		bad := false
+		if rangeKey != "" {
+			r.mu.Lock()
+			r.ranges[id] = rangeKey
+			bad = r.isBadLocked(rangeKey)
+			r.mu.Unlock()
+			r.logger.Info("proxy exit rotated", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name), "reason", reason, "status", status, "exit_range", rangeKey, "known_bad", bad)
+			if bad {
+				// Drawing a known-bad exit again is not worth an AI call.
 				continue
 			}
-			r.resume(proxy, reason, "")
-			return
+		} else {
+			r.logger.Info("proxy exit address unreadable", "component", "proxy", "event", "proxy_exit_unreadable", "proxy", config.RedactURL(proxy.name), "reason", reason, "status", status)
 		}
-		r.mu.Lock()
-		r.ranges[id] = rangeKey
-		bad := r.isBadLocked(rangeKey)
-		r.mu.Unlock()
-		r.logger.Info("proxy exit rotated", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name), "reason", reason, "status", status, "exit_range", rangeKey, "known_bad", bad)
 
-		if bad {
-			// Drawing a known-bad exit again is not worth an AI call.
-			continue
-		}
 		ok, feasible := r.probeModelCall(proxy)
-		if !feasible {
-			// No model can be probed (no anonymous lane, empty catalog). The
-			// rotation itself is then the only evidence available; looping would
-			// just burn quota and leave the proxy out of service.
-			r.logger.Info("proxy exit rotated but cannot be probed", "component", "proxy", "event", "rotate_probe_skipped", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey)
-			r.resume(proxy, reason, rangeKey)
-			return
-		}
-		if ok {
+		switch {
+		case ok:
 			r.resume(proxy, reason, rangeKey)
 			r.logger.Info("rotating proxy back in service", "component", "proxy", "event", "rotate_probe_succeeded", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey, "attempt", attempt+1)
 			return
+		case feasible:
+			r.logger.Warn("rotated exit still failed the model probe", "component", "proxy", "event", "rotate_probe_failed", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey, "attempt", attempt+1)
+		case rangeKey != "":
+			// The exit address was readable, so the route itself works; there is
+			// simply no model to probe it with. Accept the rotation rather than
+			// looping on evidence that cannot exist.
+			r.logger.Info("proxy exit rotated but cannot be probed", "component", "proxy", "event", "rotate_probe_skipped", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey)
+			r.resume(proxy, reason, rangeKey)
+			return
+		default:
+			// Neither the exit address nor a model probe could be obtained: the
+			// route is unproven. Keep the proxy suspended so the static fallback
+			// serves, and let the next rotation try again.
+			r.logger.Warn("proxy exit could not be verified; staying on fallback", "component", "proxy", "event", "proxy_unverified", "proxy", config.RedactURL(proxy.name), "reason", reason, "attempt", attempt+1)
+			return
 		}
-		r.logger.Warn("rotated exit still failed the model probe", "component", "proxy", "event", "rotate_probe_failed", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey, "attempt", attempt+1)
 	}
 	r.logger.Warn("proxy kept landing on unusable exits; staying on the static fallback", "component", "proxy", "event", "proxy_rotate_exhausted", "proxy", config.RedactURL(proxy.name), "reason", reason)
 }
@@ -366,29 +365,55 @@ func (r *proxyRotator) probeModelCall(proxy *proxyTransport) (ok, feasible bool)
 	if model == "" {
 		return false, false
 	}
-	route, err := g.catalog.Route(model, g.zenNodes.Len() > 0, g.goNodes.Len() > 0, g.cfg.Anonymous)
-	if err != nil {
-		return false, false
-	}
-	protocol := route.ProtocolFor(config.TierZen)
+	protocol := g.probeProtocol(model)
 	if protocol == "" {
-		protocol = route.Protocol
-	}
-	body, err := probePayload(model, protocol, "", isLegacyZenUpstream(models.LegacyZenBase))
-	if err != nil {
 		return false, false
 	}
+
+	// Mirror the real anonymous lane: the legacy /zen/v1 gate first, then the
+	// configured /inference origin. Probing only the legacy gate would report a
+	// healthy exit as broken whenever that gate alone rejects the request.
+	feasible = false
+	for _, baseURL := range g.anonymousUpstreams() {
+		body, err := probePayload(model, protocol, "", isLegacyZenUpstream(baseURL))
+		if err != nil {
+			continue
+		}
+		feasible = true
+		if r.probeThrough(proxy, baseURL, model, protocol, body) {
+			return true, true
+		}
+	}
+	return false, feasible
+}
+
+// probeProtocol resolves the wire protocol used for the probe. It prefers the
+// routed protocol but falls back to the catalog's native one, so a model that is
+// merely marked unavailable does not make the probe impossible.
+func (g *Gateway) probeProtocol(model string) wire.Protocol {
+	if route, err := g.catalog.Route(model, g.zenNodes.Len() > 0, g.goNodes.Len() > 0, g.cfg.Anonymous); err == nil {
+		if protocol := route.ProtocolFor(config.TierZen); protocol != "" {
+			return protocol
+		}
+		return route.Protocol
+	}
+	diagnostic := g.catalog.Diagnostic(model, wire.Chat, g.zenNodes.Len() > 0, false, g.cfg.Anonymous)
+	return diagnostic.NativeProtocols[config.TierZen]
+}
+
+// probeThrough performs one minimal model call through the proxy.
+func (r *proxyRotator) probeThrough(proxy *proxyTransport, baseURL, model string, protocol wire.Protocol, body []byte) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
 	ids := identity.RequestIDs{Request: identity.RandomID("req", 16), Session: identity.CanonicalSessionID("rotation:" + config.Fingerprint(proxy.name)), Project: "opencode2api:default-project"}
-	req, err := newUpstreamRequest(ctx, models.LegacyZenBase, protocol, body, ids, anonymousZenKey)
+	req, err := newUpstreamRequest(ctx, baseURL, protocol, body, ids, anonymousZenKey)
 	if err != nil {
-		return false, false
+		return false
 	}
 	req.Close = true
 	resp, err := proxy.client.Do(req)
 	if err != nil {
-		return false, true
+		return false
 	}
 	defer func() {
 		if resp.Body != nil {
@@ -396,16 +421,14 @@ func (r *proxyRotator) probeModelCall(proxy *proxyTransport) (ok, feasible bool)
 		}
 	}()
 	if resp.StatusCode/100 != 2 {
-		// A model-level rejection says nothing about the exit: the model may be
-		// retired or unsupported, which no rotation can fix.
-		return false, !isModelUnavailable(resp.StatusCode, "")
+		return false
 	}
 	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") && protocol != wire.SystemOne {
 		if _, err := wire.CollapseStream(resp.Body, protocol, model); err != nil {
-			return false, true
+			return false
 		}
 	}
-	return true, true
+	return true
 }
 
 // rotationProbeModel picks a free model already known to work with the public
@@ -414,14 +437,22 @@ func (g *Gateway) rotationProbeModel() string {
 	if g == nil || g.catalog == nil {
 		return ""
 	}
-	for _, model := range g.catalog.List() {
-		if !g.catalog.IsFreeModel(model) {
-			continue
+	models := g.catalog.List()
+	for _, model := range models {
+		if g.catalog.IsFreeModel(model) && g.catalog.EligibleForAnonymous(model) {
+			return model
 		}
-		if !g.catalog.EligibleForAnonymous(model) {
-			continue
+	}
+	// Every free model may be marked unavailable after a run of 403s, which says
+	// nothing about a brand-new exit. Fall back to any free model, then to any
+	// model at all, so an exit can still be verified.
+	for _, model := range models {
+		if g.catalog.IsFreeModel(model) {
+			return model
 		}
-		return model
+	}
+	if len(models) > 0 {
+		return models[0]
 	}
 	return ""
 }
