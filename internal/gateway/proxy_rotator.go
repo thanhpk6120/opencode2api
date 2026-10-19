@@ -178,7 +178,7 @@ func (r *proxyRotator) renew(proxy *proxyTransport, reason string) {
 		// Only the health/cooldown state is cleared here. The renewal flag stays
 		// set until the probe below proves the new exit can serve a model,
 		// otherwise traffic would resume on an unverified exit.
-		r.gateway.resetProxyHealth(proxy)
+		r.gateway.resetProxyHealth(proxy, proxyHealthResetLog{reason: reason, attempt: attempt + 1})
 
 		rangeKey := r.probeExitRange(proxy)
 		bad := false

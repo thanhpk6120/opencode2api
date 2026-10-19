@@ -65,6 +65,14 @@ func callRotateLink(ctx context.Context, link string) (int, string, error) {
 	return resp.StatusCode, strings.TrimSpace(string(body)), nil
 }
 
+// proxyHealthResetLog records what a health reset was actually caused by, so the
+// log stream does not call every reset a rotation: the auto-renewal path clears
+// health long before it knows the new exit works.
+type proxyHealthResetLog struct {
+	reason  string
+	attempt int
+}
+
 // resetProxyRoute clears health and cooldown state for the transport whose
 // fingerprint matches the configured proxy id, so the freshly rotated exit is
 // eligible on the next request. It also clears the renewal flag: this is the
@@ -85,7 +93,7 @@ func (g *Gateway) resetProxyRoute(id string) {
 		if proxy.client != nil {
 			proxy.client.CloseIdleConnections()
 		}
-		g.resetProxyHealth(proxy)
+		g.resetProxyHealth(proxy, proxyHealthResetLog{reason: "manual"})
 		return
 	}
 }
@@ -94,11 +102,20 @@ func (g *Gateway) resetProxyRoute(id string) {
 // touching the renewal flag. The automatic recovery path uses it: a rotation
 // that only got a 2xx from the rotate link is not yet proof that the new exit
 // works, so the proxy must stay out of service until the model probe passes.
-func (g *Gateway) resetProxyHealth(proxy *proxyTransport) {
+//
+// This only clears state: it does not mean the exit changed. The event name says
+// so ("proxy_health_reset" plus its cause and attempt), because the previous
+// "proxy_rotated" made an early state clear indistinguishable from a confirmed
+// new exit.
+func (g *Gateway) resetProxyHealth(proxy *proxyTransport, cause proxyHealthResetLog) {
 	if g == nil || proxy == nil {
 		return
 	}
 	proxy.healthy.Store(true)
 	g.restoreProxy(proxy)
-	g.logger.Info("proxy exit rotated", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name))
+	attrs := []any{"component", "proxy", "event", "proxy_health_reset", "proxy", config.RedactURL(proxy.name), "cause", cause.reason}
+	if cause.attempt > 0 {
+		attrs = append(attrs, "attempt", cause.attempt)
+	}
+	g.logger.Info("proxy health cleared", attrs...)
 }

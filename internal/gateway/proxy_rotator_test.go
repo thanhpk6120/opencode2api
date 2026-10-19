@@ -433,7 +433,7 @@ func TestRenewKeepsProxySuspendedUntilProbe(t *testing.T) {
 	proxy.refreshing.Store(true)
 	g := &Gateway{cfg: config.Config{}, transports: pool, logger: testLogger()}
 
-	g.resetProxyHealth(proxy)
+	g.resetProxyHealth(proxy, proxyHealthResetLog{reason: "test"})
 	if !proxy.healthy.Load() {
 		t.Fatal("resetProxyHealth không bật lại healthy")
 	}
