@@ -27,6 +27,9 @@ type Config struct {
 	ProxyFile         string                       `json:"proxyfile"`
 	ProxyMode         string                       `json:"proxy_mode,omitempty"`
 	ProxyDisabled     []string                     `json:"proxy_disabled,omitempty"`
+	ProxyRotateLinks  map[string]string            `json:"proxy_rotate_links,omitempty"`
+	ProxySource       string                       `json:"proxy_source,omitempty"`
+	Rotating          RotatingProxyConfig          `json:"rotating_proxy,omitempty"`
 	Upstream          UpstreamConfig               `json:"upstream"`
 	Retry             RetryConfig                  `json:"retry"`
 	Models            ModelsConfig                 `json:"models"`
@@ -51,6 +54,21 @@ type ReasoningConfig struct {
 	// never set, matching how the rest of the optional surface is persisted.
 	Effort        string            `json:"effort,omitempty"`
 	EffortByModel map[string]string `json:"effort_by_model,omitempty"`
+}
+
+type RotatingProxyConfig struct {
+	// AutoRotate rotates the exit IP when the current one failed an AI-model
+	// call, instead of waiting for the operator to press the button.
+	AutoRotate bool `json:"auto_rotate,omitempty"`
+	// MinIntervalSeconds is the floor between two rotations. It exists to stop
+	// a burst of failures from spamming the provider's rotate endpoint.
+	MinIntervalSeconds int `json:"min_interval_seconds,omitempty"`
+	// MaxIntervalSeconds forces a rotation once this much time passed since the
+	// last one, even while everything still works.
+	MaxIntervalSeconds int `json:"max_interval_seconds,omitempty"`
+	// FailedIPCacheSize is how many bad exit-IP ranges are remembered. The
+	// oldest entry is dropped when a new one arrives.
+	FailedIPCacheSize int `json:"failed_ip_cache_size,omitempty"`
 }
 
 type UpstreamConfig struct {
@@ -246,6 +264,12 @@ func Normalize(path string, cfg Config) (Config, error) {
 		return Config{}, fmt.Errorf("proxy_mode must be sticky, roundrobin, or random")
 	}
 	trimList(&cfg.ProxyDisabled)
+	if err := normalizeProxyRotateLinks(&cfg); err != nil {
+		return Config{}, err
+	}
+	if err := normalizeRotatingProxy(&cfg); err != nil {
+		return Config{}, err
+	}
 	for _, raw := range cfg.RuntimeProxies() {
 		if raw == "direct" {
 			continue
@@ -307,6 +331,43 @@ func normalizeReasoning(cfg *Config) error {
 	return nil
 }
 
+// normalizeRotatingProxy validates proxy_source and fills the rotating-proxy
+// defaults. Zero values mean "not configured", so an existing config keeps the
+// feature off until an operator sets it.
+func normalizeRotatingProxy(cfg *Config) error {
+	cfg.ProxySource = strings.ToLower(strings.TrimSpace(cfg.ProxySource))
+	switch cfg.ProxySource {
+	case "", ProxySourceBoth, ProxySourceStatic, ProxySourceRotating:
+	default:
+		return fmt.Errorf("proxy_source must be both, static, or rotating")
+	}
+	rot := &cfg.Rotating
+	// Omitted (zero) fields take the documented defaults, so a config that only
+	// turns on auto_rotate still gets a sane throttle and cache.
+	if rot.MinIntervalSeconds == 0 {
+		rot.MinIntervalSeconds = DefaultRotateMinIntervalSeconds
+	}
+	if rot.MaxIntervalSeconds == 0 {
+		rot.MaxIntervalSeconds = DefaultRotateMaxIntervalSeconds
+	}
+	if rot.FailedIPCacheSize == 0 {
+		rot.FailedIPCacheSize = DefaultRotateFailedIPCacheSize
+	}
+	if rot.MinIntervalSeconds < 0 {
+		return errors.New("rotating_proxy.min_interval_seconds must not be negative")
+	}
+	if rot.MaxIntervalSeconds < 0 {
+		return errors.New("rotating_proxy.max_interval_seconds must not be negative")
+	}
+	if rot.MaxIntervalSeconds > 0 && rot.MaxIntervalSeconds < rot.MinIntervalSeconds {
+		return errors.New("rotating_proxy.max_interval_seconds must be greater than or equal to min_interval_seconds")
+	}
+	if rot.FailedIPCacheSize < 1 || rot.FailedIPCacheSize > 100 {
+		return errors.New("rotating_proxy.failed_ip_cache_size must be between 1 and 100")
+	}
+	return nil
+}
+
 // validateEffort accepts the levels the OpenAI and Anthropic surfaces define
 // plus an empty string, which means "not forced".
 func validateEffort(name, value string) error {
@@ -359,11 +420,44 @@ func (cfg Config) RuntimeProxies() []string {
 	if len(cfg.effectiveProxies) > 0 {
 		base = cfg.effectiveProxies
 	}
-	out := EffectiveProxyList(base, cfg.ProxyDisabled)
-	if len(out) > 0 {
-		return out
+	if len(base) == 0 {
+		// Nothing configured at all: the historic "direct" default still applies.
+		return []string{"direct"}
 	}
-	return []string{"direct"}
+	// An empty result here means the operator disabled every proxy. Falling
+	// back to "direct" would silently re-enable an egress they just turned off,
+	// so the empty list is returned and the gateway rejects requests instead.
+	return EffectiveProxyList(cfg.ProxyEntriesForSource(base), cfg.ProxyDisabled)
+}
+
+// ProxyEntriesForSource applies proxy_source to a configured proxy list.
+// "direct" and plain URLs are static; entries marked pool+ / #pool rotate.
+func (cfg Config) ProxyEntriesForSource(entries []string) []string {
+	mode := strings.TrimSpace(cfg.ProxySource)
+	if mode == "" || mode == ProxySourceBoth {
+		return append([]string(nil), entries...)
+	}
+	out := make([]string, 0, len(entries))
+	for _, raw := range entries {
+		_, pool := ParseProxyEntry(raw)
+		// A proxy counts as rotating when it is marked as a rotating pool or
+		// when the operator gave it an exit-IP rotate link; both describe an
+		// endpoint whose exit can be changed on demand.
+		rotating := pool || cfg.ProxyRotateLink(Fingerprint(raw)) != ""
+		if (mode == ProxySourceRotating) == rotating {
+			out = append(out, raw)
+		}
+	}
+	return out
+}
+
+// ProxyRotateLink returns the operator-configured "change exit IP" endpoint
+// for one proxy, keyed by fingerprint so an edited address keeps its link.
+func (cfg Config) ProxyRotateLink(id string) string {
+	if len(cfg.ProxyRotateLinks) == 0 {
+		return ""
+	}
+	return cfg.ProxyRotateLinks[id]
 }
 
 // ProxySelectionMode returns the configured proxy selection mode, defaulting
@@ -396,6 +490,11 @@ func Clone(cfg Config) Config {
 	cfg.GoKeys = append([]string(nil), cfg.GoKeys...)
 	cfg.Proxies = append([]string(nil), cfg.Proxies...)
 	cfg.ProxyDisabled = append([]string(nil), cfg.ProxyDisabled...)
+	links := make(map[string]string, len(cfg.ProxyRotateLinks))
+	for id, link := range cfg.ProxyRotateLinks {
+		links[id] = link
+	}
+	cfg.ProxyRotateLinks = links
 	cfg.effectiveProxies = append([]string(nil), cfg.effectiveProxies...)
 	if cfg.Models.Protocols != nil {
 		protocols := make(map[string]string, len(cfg.Models.Protocols))

@@ -8,6 +8,14 @@
   "proxyfile": "",
   "proxy_mode": "roundrobin",
   "proxy_disabled": [],
+  "proxy_rotate_links": {},
+  "proxy_source": "both",
+  "rotating_proxy": {
+    "auto_rotate": true,
+    "min_interval_seconds": 60,
+    "max_interval_seconds": 1800,
+    "failed_ip_cache_size": 10
+  },
   "upstream": {
     "zen": "https://opencode.ai/zen",
     "go": "https://opencode.ai/zen/go",

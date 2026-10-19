@@ -617,6 +617,48 @@
             <section class="section">
               <div class="section-head">
                 <div>
+                  <h2 class="section-title" data-i18n="proxies.source.title">代理来源与轮换</h2>
+                  <p class="section-caption" data-i18n="proxies.source.caption">
+                    选择只使用静态代理或只使用轮换代理；轮换代理会按下方规则自动更换出口 IP。
+                  </p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="proxy-source" data-i18n="proxies.source.label">使用的代理类型</label>
+                  <select id="proxy-source" class="select">
+                    <option value="both" data-i18n="proxies.source.both">静态 + 轮换</option>
+                    <option value="static" data-i18n="proxies.source.static">仅静态代理</option>
+                    <option value="rotating" data-i18n="proxies.source.rotating">仅轮换代理</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="proxy-auto-rotate" data-i18n="proxies.rotating.auto">调用 AI 模型失败时自动轮换</label>
+                  <input id="proxy-auto-rotate" type="checkbox" />
+                </div>
+                <div class="field">
+                  <label for="proxy-rotate-min" data-i18n="proxies.rotating.min">最小轮换间隔（秒）</label>
+                  <input id="proxy-rotate-min" class="input" type="number" min="1" step="1" />
+                </div>
+                <div class="field">
+                  <label for="proxy-rotate-max" data-i18n="proxies.rotating.max">最大轮换间隔（秒）</label>
+                  <input id="proxy-rotate-max" class="input" type="number" min="1" step="1" />
+                </div>
+                <div class="field">
+                  <label for="proxy-rotate-cache" data-i18n="proxies.rotating.cache">失败 IP 段缓存数量</label>
+                  <input id="proxy-rotate-cache" class="input" type="number" min="1" max="100" step="1" />
+                </div>
+              </div>
+              <div class="actions">
+                <button id="proxy-settings-save" class="btn btn-sm btn-primary" data-i18n="proxies.source.save">
+                  保存代理设置
+                </button>
+              </div>
+            </section>
+
+            <section class="section">
+              <div class="section-head">
+                <div>
                   <h2 class="section-title">
                     <span data-i18n="proxies.list.title">代理列表</span>
                     <span id="proxy-count" class="section-caption"></span>
@@ -640,6 +682,7 @@
                   <thead>
                     <tr>
                       <th data-i18n="proxies.col.address">代理地址</th>
+                      <th data-i18n="proxies.col.rotate">IP 轮换链接</th>
                       <th data-i18n="proxies.col.health">健康状态</th>
                       <th data-i18n="proxies.col.state">启停状态</th>
                       <th data-i18n="proxies.col.binding">密钥与匿名绑定</th>
@@ -670,6 +713,15 @@
                       placeholder="10.0.0.1:8080:user:pass&#10;socks5://user:pass@10.0.0.2:1080"
                       data-i18n-attr="placeholder:proxies.add.placeholder"
                     ></textarea>
+                  </div>
+                  <div class="field full">
+                    <label for="proxy-add-rotate" data-i18n="proxies.add.rotate">IP 轮换链接（可选，批量应用）</label>
+                    <input
+                      id="proxy-add-rotate"
+                      placeholder="https://provider.example.com/changeip?token=..."
+                      data-i18n-attr="placeholder:proxies.add.rotatePlaceholder"
+                      maxlength="512"
+                    />
                   </div>
                 </div>
                 <div class="actions">

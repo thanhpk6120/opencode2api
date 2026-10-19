@@ -92,3 +92,56 @@ func TestNormalizeAcceptsPoolProxy(t *testing.T) {
 		t.Errorf("pool proxy credentials survived redaction: %q", got)
 	}
 }
+
+// A rotate link is operator input that the gateway calls server-side, so only
+// http/https survives normalization; anything else must be rejected rather
+// than stored.
+func TestNormalizeRotateLinkRejectsNonHTTP(t *testing.T) {
+	if _, err := NormalizeRotateLink("file:///etc/shadow"); err == nil {
+		t.Error("file:// rotate link accepted")
+	}
+	if _, err := NormalizeRotateLink("javascript:alert(1)"); err == nil {
+		t.Error("javascript: rotate link accepted")
+	}
+	if got, err := NormalizeRotateLink("  https://p.example/change?token=1  "); err != nil || got != "https://p.example/change?token=1" {
+		t.Errorf("NormalizeRotateLink = (%q, %v)", got, err)
+	}
+	if got, err := NormalizeRotateLink("   "); err != nil || got != "" {
+		t.Errorf("blank rotate link = (%q, %v), want empty and no error", got, err)
+	}
+}
+
+// Rotate links are keyed by proxy fingerprint and must survive a config
+// round-trip through Normalize, including an edited-address remap.
+func TestNormalizeKeepsRotateLinks(t *testing.T) {
+	proxy := "http://user:pass@127.0.0.1:7890"
+	cfg := Config{
+		Listen:           "127.0.0.1:8080",
+		ServerKeys:       []string{"local-key"},
+		Anonymous:        true,
+		Proxies:          []string{proxy},
+		ProxyRotateLinks: map[string]string{Fingerprint(proxy): "https://p.example/change", "stale": "  "},
+		Upstream:         UpstreamConfig{Zen: "https://opencode.ai/zen", Go: "https://opencode.ai/zen/go", Anonymous: "https://opencode.ai/inference"},
+		Retry:            RetryConfig{MaxAttempts: 3, TimeoutSeconds: 300},
+		Models:           ModelsConfig{RefreshSeconds: 300, Protocols: map[string]string{}},
+		Performance:      PerformanceConfig{MaxIdleConns: 10, MaxIdleConnsPerHost: 10, IdleConnTimeoutSeconds: 30, ConnectTimeoutSeconds: 5, FailureCooldownSeconds: 15},
+		Logging:          LoggingConfig{Level: "info", RingSize: 100},
+		Prefer:           TierGo,
+	}
+	normalized, err := Normalize("config.json", cfg)
+	if err != nil {
+		t.Fatalf("Normalize rejected rotate links: %v", err)
+	}
+	if got := normalized.ProxyRotateLink(Fingerprint(proxy)); got != "https://p.example/change" {
+		t.Errorf("rotate link lost: %q", got)
+	}
+	if _, ok := normalized.ProxyRotateLinks["stale"]; ok {
+		t.Error("blank rotate link was persisted")
+	}
+	// Clone must deep-copy the map, or an admin update would mutate the live cfg.
+	clone := Clone(normalized)
+	clone.ProxyRotateLinks[Fingerprint(proxy)] = "https://other.example"
+	if normalized.ProxyRotateLink(Fingerprint(proxy)) != "https://p.example/change" {
+		t.Error("Clone shares the rotate-link map with the original")
+	}
+}

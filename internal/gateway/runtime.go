@@ -146,6 +146,7 @@ func (m *RuntimeManager) start(runtime *gatewayRuntime) {
 	runtimeCtx, cancel := context.WithCancel(m.root)
 	runtime.cancel = cancel
 	runtime.gateway.StartProxyHealthChecks(runtimeCtx)
+	runtime.gateway.StartProxyRotation(runtimeCtx)
 	runtime.gateway.StartModelRefresh(runtimeCtx)
 }
 

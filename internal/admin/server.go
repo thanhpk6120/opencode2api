@@ -69,6 +69,8 @@ mux.Handle("DELETE /api/proxies/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.
 	mux.Handle("PUT /api/proxies/mode", a.authenticate(a.csrf(http.HandlerFunc(a.handleSetProxyMode))))
 	mux.Handle("POST /api/proxies/mode", a.authenticate(a.csrf(http.HandlerFunc(a.handleSetProxyMode))))
 mux.Handle("POST /api/proxies/test", a.authenticate(a.csrf(http.HandlerFunc(a.handleTestProxy))))
+mux.Handle("POST /api/proxies/{id}/rotate", a.authenticate(a.csrf(http.HandlerFunc(a.handleRotateProxy))))
+	mux.Handle("PUT /api/proxies/settings", a.authenticate(a.csrf(http.HandlerFunc(a.handleSaveProxySettings))))
 mux.Handle("GET /api/api-keys", a.authenticate(http.HandlerFunc(a.handleListAPIKeys)))
 	mux.Handle("POST /api/api-keys", a.authenticate(a.csrf(http.HandlerFunc(a.handleCreateAPIKey))))
 	mux.Handle("PATCH /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleUpdateAPIKey))))
@@ -232,7 +234,13 @@ candidate := config.Config{
 		ServerKeyMetadata: current.ServerKeyMetadata,
 		Rotation:          current.Rotation,
 		Listen:            update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Proxies: proxies, ProxyFile: update.ProxyFile, ProxyMode: proxyMode, ProxyDisabled: proxyDisabled,
-		Upstream: update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
+		// Rotate links are managed on the Proxies page; the legacy config form
+		// omits them, so carry the current mapping instead of clearing it.
+		ProxyRotateLinks: current.ProxyRotateLinks,
+		// Proxy source and rotation schedule are managed on the Proxies page too.
+		ProxySource: current.ProxySource,
+		Rotating:    current.Rotating,
+		Upstream:    update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
 		Reasoning: reasoning,
 		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
 	}

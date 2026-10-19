@@ -17,6 +17,22 @@ const (
 	ProxyModeRandom     = "random"
 )
 
+// Proxy source modes restrict which configured entries are used at all.
+// Empty means "both", so existing configurations keep their behavior.
+const (
+	ProxySourceBoth     = "both"
+	ProxySourceStatic   = "static"
+	ProxySourceRotating = "rotating"
+)
+
+// Rotating-proxy defaults. They are applied during Normalize so the hot path
+// and the operator UI read one canonical value.
+const (
+	DefaultRotateMinIntervalSeconds = 60
+	DefaultRotateMaxIntervalSeconds = 1800
+	DefaultRotateFailedIPCacheSize  = 10
+)
+
 // ParseProxyLine normalizes one operator-supplied proxy line into the URL
 // form stored in Config.Proxies. Accepted forms:
 //

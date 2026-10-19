@@ -488,8 +488,11 @@ type nodePool struct {
 // are fewer keys than proxies, the remaining proxies are intentionally idle and
 // can take over a key immediately if an active proxy fails.
 func newNodePool(keys []string, transports *transportPool, cooldown time.Duration, mode string) (*nodePool, error) {
-	if transports == nil || len(transports.items) == 0 {
-		return nil, fmt.Errorf("at least one proxy transport is required")
+	// An empty pool is legal and means "the operator disabled every proxy".
+	// Keys keep their nodes but resolve to no transport, so requests fail
+	// fast with a proxy error instead of silently going out through direct.
+	if transports == nil {
+		transports = &transportPool{}
 	}
 	if mode == "" {
 		mode = config.ProxyModeRoundRobin
@@ -502,6 +505,14 @@ func newNodePool(keys []string, transports *transportPool, cooldown time.Duratio
 		mode:         mode,
 	}
 	if len(keys) == 0 {
+		return pool, nil
+	}
+	if len(transports.items) == 0 {
+		for i, key := range keys {
+			node := &upstreamNode{key: key, index: i, preferredProxy: -1}
+			node.proxyIndex.Store(-1)
+			pool.nodes = append(pool.nodes, node)
+		}
 		return pool, nil
 	}
 	for i, key := range keys {

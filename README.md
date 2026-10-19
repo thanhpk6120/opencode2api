@@ -337,6 +337,43 @@ A pool entry is handled differently from a static proxy:
 
 Use it when the endpoint behind the URL already performs the rotation and the pool's own exit IPs are individually rate-limited or flaky; the gateway then treats each attempt as a fresh endpoint instead of pinning the conversation to one exit. A single `#pool` entry is enough — you no longer need to list dozens of exits. Static entries keep the pooling behavior described below.
 
+#### On-demand exit-IP rotation
+
+Some providers expose an HTTP endpoint that changes the exit IP for the next connection. Configure it per proxy as `proxy_rotate_links` — a map from the proxy fingerprint (the `id` shown in the WebUI) to that URL:
+
+```json
+"proxy_rotate_links": {
+  "1a2b3c4d5e": "https://provider.example.com/changeip?token=..."
+}
+```
+
+The Proxies page shows each link and offers **Set rotate link** and **Rotate IP**; `POST /api/proxies/{id}/rotate` performs the same action. Only `http`/`https` links are accepted, and a rotate response outside 2xx/3xx is reported as a failure rather than treated as a change. A successful rotation also clears that proxy's health and cooldowns, so the new exit IP is used on the next request instead of waiting for the 15-minute health check. For an endpoint that rotates by itself on every connection, use `#pool` above instead.
+
+#### Automatic rotation, source mode, and failed-range memory
+
+`proxy_source` decides which configured entries are used at all: `both` (default), `static` for plain proxies only, or `rotating` for entries that are marked `#pool` or carry a rotate link. Disabling every proxy leaves the pool empty and the gateway answers `503` with a proxy error instead of silently falling back to `direct`.
+
+`rotating_proxy` controls when a rotating proxy changes its exit IP:
+
+```json
+"proxy_source": "rotating",
+"rotating_proxy": {
+  "auto_rotate": true,
+  "min_interval_seconds": 60,
+  "max_interval_seconds": 1800,
+  "failed_ip_cache_size": 10
+}
+```
+
+| Field                   | Meaning                                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------------------- |
+| `auto_rotate`           | Rotate after an AI-model call fails on that proxy (transport error, `5xx`, `429`, or `403`).              |
+| `min_interval_seconds`  | Floor between two rotations. It throttles a burst of failures and also spaces re-rotations after a bad draw. |
+| `max_interval_seconds`  | Forced rotation once this much time passed since the last one, even while everything still works. |
+| `failed_ip_cache_size`  | How many failed exit ranges are remembered. The oldest entry is dropped when a new one arrives.            |
+
+A failed-range memory keys on the exit network (`/24` for IPv4, `/48` for IPv6) read from the proxy's own egress. When a rotation lands on a range that already failed, the gateway rotates again, but never faster than `min_interval_seconds`, up to five attempts. The Proxies page exposes the same settings — source mode, the three timers, and the cache size — through `PUT /api/proxies/settings`.
+
 ### Timeouts and connection pools
 
 | Field                                   | Default | Meaning                                                |

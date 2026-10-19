@@ -56,6 +56,11 @@ func debugKeyOverrideFrom(ctx context.Context) (DebugKeyOverride, bool) {
 }
 
 func (g *Gateway) doUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs) (*http.Response, models.Route, error) {
+	// Every proxy is disabled: fail fast with the proxy error instead of
+	// sending traffic out through direct, which the operator switched off.
+	if g.transports == nil || len(g.transports.items) == 0 {
+		return nil, route, fmt.Errorf("%w: no proxy is enabled", errProxyUnavailable)
+	}
 	resp, effectiveRoute, attempts, err := g.doUpstreamTiers(ctx, route, bodies, ids, 0)
 	if _, selected := debugKeyOverrideFrom(ctx); selected {
 		return resp, effectiveRoute, err
@@ -911,7 +916,7 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 	}
 	proxy := nodes.Proxy(node)
 	if proxy == nil {
-		return nil, errors.New("selected upstream key has no proxy binding"), 0
+		return nil, fmt.Errorf("%w: selected upstream key has no proxy binding", errProxyUnavailable), 0
 	}
 	if meta := telemetry.MetaFromContext(ctx); meta != nil {
 		meta.Attempts = attemptOffset + 1
@@ -992,7 +997,9 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		}
 		proxy := nodes.Proxy(node)
 		if proxy == nil {
-			lastErr = errors.New("upstream key has no proxy binding")
+			// No enabled proxy at all; report it as a proxy error so the client
+			// sees "all proxies are unavailable" rather than a bad gateway.
+			lastErr = fmt.Errorf("%w: upstream key has no proxy binding", errProxyUnavailable)
 			break
 		}
 		if proxy.pool {
@@ -1050,6 +1057,9 @@ func (g *Gateway) observeKeyResult(ctx context.Context, nodes *nodePool, node *u
 	}
 	status := upstreamStatus(resp)
 	proxyFailed := g.syncProxyResult(ctx, proxy, status, err)
+	if err != nil || status >= 500 || status == http.StatusTooManyRequests || status == http.StatusForbidden {
+		g.observeRotatingFailure(proxy)
+	}
 	if err == nil && status/100 == 2 || isNonRetryableClientResponse(resp, err) {
 		nodes.MarkSuccess(node)
 		return
@@ -1065,6 +1075,9 @@ func (g *Gateway) observeAnonymousResult(ctx context.Context, node *anonymousNod
 	}
 	status := upstreamStatus(resp)
 	g.syncProxyResult(ctx, node.proxy, status, err)
+	if err != nil || status >= 500 || status == http.StatusTooManyRequests || status == http.StatusForbidden {
+		g.observeRotatingFailure(node.proxy)
+	}
 	if err == nil && status/100 == 2 {
 		g.anonymous.MarkSuccess(node)
 	} else {

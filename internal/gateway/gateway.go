@@ -59,6 +59,9 @@ type Gateway struct {
 	// attemptTimeout bounds a whole upstream attempt (dial + write + headers +
 	// first event), not just the header wait. Zero keeps the legacy behavior.
 	attemptTimeout time.Duration
+	// rotator changes the exit IP of rotating proxies; nil when the feature is
+	// not configured and no rotate link exists.
+	rotator *proxyRotator
 }
 
 func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*Gateway, error) {
@@ -84,7 +87,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*G
 	catalog := models.NewCatalog(cfg.Prefer, cfg.Models.Protocols)
 	catalog.SetRefreshInterval(time.Duration(cfg.Models.RefreshSeconds) * time.Second)
 	catalog.SetFreeOnly(cfg.Models.FreeOnly)
-	return &Gateway{
+	gateway := &Gateway{
 		cfg:            cfg,
 		rotation:       rotationManager,
 		logger:         logger,
@@ -95,7 +98,9 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Monitor) (*G
 		catalog:        catalog,
 		monitor:        monitor,
 		attemptTimeout: attemptDeadline(cfg),
-	}, nil
+	}
+	gateway.rotator = newProxyRotator(gateway, cfg.Rotating)
+	return gateway, nil
 }
 
 func (g *Gateway) Handler() http.Handler {

@@ -17,15 +17,16 @@ import (
 // is redacted (credentials hidden); the ID is the stable fingerprint used for
 // edit/delete/enable operations.
 type ProxyView struct {
-	ID        string `json:"id"`
-	Address   string `json:"address"`
-	Healthy   bool   `json:"healthy"`
-	Checking  bool   `json:"checking"`
-	Enabled   bool   `json:"enabled"`
-	Source    string `json:"source"`
-	ZenKeys   int    `json:"zen_keys"`
-	GoKeys    int    `json:"go_keys"`
-	Anonymous bool   `json:"anonymous"`
+	ID         string `json:"id"`
+	Address    string `json:"address"`
+	Healthy    bool   `json:"healthy"`
+	Checking   bool   `json:"checking"`
+	Enabled    bool   `json:"enabled"`
+	Source     string `json:"source"`
+	ZenKeys    int    `json:"zen_keys"`
+	GoKeys     int    `json:"go_keys"`
+	Anonymous  bool   `json:"anonymous"`
+	RotateLink string `json:"rotate_link,omitempty"`
 }
 
 func (a *Server) proxyViews() []ProxyView {
@@ -47,7 +48,7 @@ func (a *Server) proxyViews() []ProxyView {
 	for _, raw := range cfg.Proxies {
 		id := config.Fingerprint(raw)
 		redacted := config.RedactURL(raw)
-		view := ProxyView{ID: id, Address: redacted, Enabled: true, Source: "config"}
+		view := ProxyView{ID: id, Address: redacted, Enabled: true, Source: "config", RotateLink: cfg.ProxyRotateLink(id)}
 		if _, ok := disabled[id]; ok {
 			view.Enabled = false
 		} else if _, ok := disabled[raw]; ok {
@@ -72,7 +73,7 @@ func (a *Server) proxyViews() []ProxyView {
 		if _, ok := stored[st.ID]; ok {
 			continue
 		}
-		views = append(views, ProxyView{ID: st.ID, Address: st.Address, Healthy: st.Healthy, Checking: st.Checking, Enabled: true, Source: "proxyfile", ZenKeys: st.ZenKeys, GoKeys: st.GoKeys, Anonymous: st.Anonymous})
+		views = append(views, ProxyView{ID: st.ID, Address: st.Address, Healthy: st.Healthy, Checking: st.Checking, Enabled: true, Source: "proxyfile", RotateLink: cfg.ProxyRotateLink(st.ID), ZenKeys: st.ZenKeys, GoKeys: st.GoKeys, Anonymous: st.Anonymous})
 	}
 	return views
 }
@@ -81,15 +82,21 @@ func (a *Server) handleListProxies(w http.ResponseWriter, _ *http.Request) {
 	cfg := a.manager.Config()
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"proxies":    a.proxyViews(),
-		"proxy_mode": cfg.ProxySelectionMode(),
-		"proxyfile":  cfg.ProxyFile,
+		"proxies":        a.proxyViews(),
+		"proxy_mode":     cfg.ProxySelectionMode(),
+		"proxyfile":      cfg.ProxyFile,
+		"proxy_source":   cfg.ProxySource,
+		"rotating_proxy": cfg.Rotating,
 	})
 }
 
 func (a *Server) handleCreateProxies(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Lines []string `json:"lines"`
+		// RotateLink is applied to every proxy line in this request: an
+		// operator pasting a batch from one provider almost always shares the
+		// same "change exit IP" endpoint.
+		RotateLink string `json:"rotate_link,omitempty"`
 	}
 	if err := decodeAdminJSON(w, r, &input); err != nil {
 		writeAdminError(w, 400, "invalid_request", err.Error())
@@ -104,6 +111,11 @@ func (a *Server) handleCreateProxies(w http.ResponseWriter, r *http.Request) {
 		writeAdminError(w, 400, "invalid_proxy", "no proxy lines provided")
 		return
 	}
+	rotateLink, err := config.NormalizeRotateLink(input.RotateLink)
+	if err != nil {
+		writeAdminError(w, 400, "invalid_rotate_link", a.manager.Redact(err.Error()))
+		return
+	}
 	_, err = a.manager.Update(func(cfg *config.Config) error {
 		known := make(map[string]struct{}, len(cfg.Proxies))
 		for _, raw := range cfg.Proxies {
@@ -115,6 +127,12 @@ func (a *Server) handleCreateProxies(w http.ResponseWriter, r *http.Request) {
 			}
 			cfg.Proxies = append(cfg.Proxies, raw)
 			known[config.Fingerprint(raw)] = struct{}{}
+			if rotateLink != "" {
+				if cfg.ProxyRotateLinks == nil {
+					cfg.ProxyRotateLinks = map[string]string{}
+				}
+				cfg.ProxyRotateLinks[config.Fingerprint(raw)] = rotateLink
+			}
 		}
 		return nil
 	})
@@ -128,8 +146,9 @@ func (a *Server) handleCreateProxies(w http.ResponseWriter, r *http.Request) {
 func (a *Server) handleUpdateProxy(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var input struct {
-		Value   string `json:"value,omitempty"`
-		Enabled *bool  `json:"enabled,omitempty"`
+		Value      string  `json:"value,omitempty"`
+		Enabled    *bool   `json:"enabled,omitempty"`
+		RotateLink *string `json:"rotate_link,omitempty"`
 	}
 	if err := decodeAdminJSON(w, r, &input); err != nil {
 		writeAdminError(w, 400, "invalid_request", err.Error())
@@ -161,6 +180,30 @@ func (a *Server) handleUpdateProxy(w http.ResponseWriter, r *http.Request) {
 			// A credential change keeps the enabled flag attached to the proxy.
 			if isProxyDisabled(cfg.ProxyDisabled, oldID) {
 				cfg.ProxyDisabled = replaceProxyDisabled(cfg.ProxyDisabled, oldID, config.Fingerprint(normalized))
+			}
+			// The rotate link is keyed by fingerprint, so an edited address
+			// must carry it over instead of orphaning the mapping.
+			if link, ok := cfg.ProxyRotateLinks[oldID]; ok && oldID != config.Fingerprint(normalized) {
+				delete(cfg.ProxyRotateLinks, oldID)
+				if cfg.ProxyRotateLinks == nil {
+					cfg.ProxyRotateLinks = map[string]string{}
+				}
+				cfg.ProxyRotateLinks[config.Fingerprint(normalized)] = link
+			}
+		}
+		if input.RotateLink != nil {
+			link, err := config.NormalizeRotateLink(*input.RotateLink)
+			if err != nil {
+				return err
+			}
+			fp := config.Fingerprint(cfg.Proxies[idx])
+			if link == "" {
+				delete(cfg.ProxyRotateLinks, fp)
+			} else {
+				if cfg.ProxyRotateLinks == nil {
+					cfg.ProxyRotateLinks = map[string]string{}
+				}
+				cfg.ProxyRotateLinks[fp] = link
 			}
 		}
 		if input.Enabled != nil {
@@ -231,6 +274,33 @@ func (a *Server) handleSetProxyMode(w http.ResponseWriter, r *http.Request) {
 	a.handleListProxies(w, r)
 }
 
+// handleSaveProxySettings stores the proxy source mode and the rotating-proxy
+// schedule. Both live outside the legacy config form, which omits them.
+func (a *Server) handleSaveProxySettings(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Source   *string                     `json:"proxy_source,omitempty"`
+		Rotating *config.RotatingProxyConfig `json:"rotating_proxy,omitempty"`
+	}
+	if err := decodeAdminJSON(w, r, &input); err != nil {
+		writeAdminError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	_, err := a.manager.Update(func(cfg *config.Config) error {
+		if input.Source != nil {
+			cfg.ProxySource = *input.Source
+		}
+		if input.Rotating != nil {
+			cfg.Rotating = *input.Rotating
+		}
+		return nil
+	})
+	if err != nil {
+		writeAdminError(w, 400, "proxy_settings_failed", a.manager.Redact(err.Error()))
+		return
+	}
+	a.handleListProxies(w, r)
+}
+
 var (
 	errUnknownProxy   = proxyErr("unknown or stale proxy id")
 	errDuplicateProxy = proxyErr("proxy already exists")
@@ -269,6 +339,24 @@ func replaceProxyDisabled(disabled []string, oldID, newID string) []string {
 		}
 	}
 	return out
+}
+
+// handleRotateProxy calls the operator-configured rotate link for one proxy
+// and clears that route's health so the new exit IP is used immediately.
+func (a *Server) handleRotateProxy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	detail, err := a.manager.RotateProxyExit(r.Context(), id)
+	if err != nil {
+		writeAdminError(w, 400, "proxy_rotate_failed", a.manager.Redact(err.Error()))
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"id":      id,
+		"detail":  detail,
+		"proxies": a.proxyViews(),
+	})
 }
 
 // handleTestProxy checks one configured or ad-hoc proxy with an isolated
@@ -314,11 +402,11 @@ func (a *Server) handleTestProxy(w http.ResponseWriter, r *http.Request) {
 	reachable, status, detail := probeProxy(raw, 12*time.Second)
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":         reachable,
-		"address":    config.RedactURL(raw),
+		"ok":          reachable,
+		"address":     config.RedactURL(raw),
 		"http_status": status,
-		"latency_ms": time.Since(start).Milliseconds(),
-		"detail":     detail,
+		"latency_ms":  time.Since(start).Milliseconds(),
+		"detail":      detail,
 	})
 }
 

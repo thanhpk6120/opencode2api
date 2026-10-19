@@ -14,6 +14,10 @@ export function el(tag, props = {}, children = []) {
     else if (key.startsWith("on") && typeof value === "function")
       node.addEventListener(key.slice(2), value);
     else if (value === true) node.setAttribute(key, "");
+    // Page modules pass bare event names (`click:`), which the `on*` branch
+    // above never matched: those handlers were dropped and the handler
+    // source leaked into the DOM as a useless attribute.
+    else if (typeof value === "function") node.addEventListener(key, value);
     else node.setAttribute(key, String(value));
   }
   for (const child of Array.isArray(children) ? children : [children]) {
@@ -162,10 +166,11 @@ export function promptDialog({
   value = "",
   placeholder = "",
   confirmLabel = t("确定", "common.confirm"),
+  maxlength = 80,
 }) {
   return new Promise((resolve) => {
     let settled = false;
-    const input = el("input", { value, placeholder, maxlength: 80 });
+    const input = el("input", { value, placeholder, maxlength });
     const finish = (result, close) => {
       if (!settled) {
         settled = true;

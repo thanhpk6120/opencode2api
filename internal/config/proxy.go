@@ -131,3 +131,64 @@ func trimList(items *[]string) {
 	}
 	*items = out
 }
+
+// NormalizeRotateLink validates and trims an operator-supplied rotate link
+// (the endpoint called to change a proxy's exit IP). It returns "" when the
+// input is blank, which clears the mapping.
+func NormalizeRotateLink(raw string) (string, error) {
+	return parseProxyRotateLink(raw)
+}
+
+// parseProxyRotateLink validates the rotate link schema and returns the
+// clean URL or an error. Only http/https endpoints are accepted: the link is
+// called server-side with the operator's credentials, so a file:// or
+// javascript: value would be an SSRF-shaped footgun rather than a feature.
+func parseProxyRotateLink(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("invalid rotate link %q", trimmed)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return "", fmt.Errorf("rotate link %q must use http or https", trimmed)
+	}
+	return trimmed, nil
+}
+
+// normalizeProxyRotateLinks drops empty entries and rejects malformed or
+// unsupported links before they are persisted. Values keyed by a fingerprint
+// that no longer matches any configured proxy are kept: a proxy can be
+// temporarily disabled or restored from proxyfile, and silently losing the
+// operator's rotate link would be worse than one stale key.
+func normalizeProxyRotateLinks(cfg *Config) error {
+	if len(cfg.ProxyRotateLinks) == 0 {
+		cfg.ProxyRotateLinks = nil
+		return nil
+	}
+	cleaned := make(map[string]string, len(cfg.ProxyRotateLinks))
+	for id, raw := range cfg.ProxyRotateLinks {
+		key := strings.TrimSpace(id)
+		if key == "" {
+			continue
+		}
+		link, err := parseProxyRotateLink(raw)
+		if err != nil {
+			return err
+		}
+		if link == "" {
+			continue
+		}
+		cleaned[key] = link
+	}
+	if len(cleaned) == 0 {
+		cfg.ProxyRotateLinks = nil
+		return nil
+	}
+	cfg.ProxyRotateLinks = cleaned
+	return nil
+}

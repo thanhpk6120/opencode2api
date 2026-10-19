@@ -7,6 +7,8 @@ import { $, el, emptyRow, confirmDialog, promptDialog, toast } from "../ui.js";
 let proxiesLoading = false;
 let currentProxies = [];
 let proxyMode = "roundrobin";
+let proxySource = "both";
+let rotatingSettings = {};
 
 const modeDescriptions = () => ({
   sticky: t(
@@ -32,6 +34,8 @@ async function load() {
     const data = await api("/api/proxies");
     if (hasSession()) {
       proxyMode = data.proxy_mode || "roundrobin";
+      proxySource = data.proxy_source || "both";
+      rotatingSettings = data.rotating_proxy || {};
       currentProxies = data.proxies || [];
       render();
     }
@@ -68,6 +72,48 @@ async function setMode(newMode) {
     if (select) select.value = proxyMode;
   } finally {
     if (select) select.disabled = false;
+  }
+}
+
+function updateSettingsDisplay() {
+  const source = $("#proxy-source");
+  if (source) source.value = proxySource;
+  const auto = $("#proxy-auto-rotate");
+  if (auto) auto.checked = Boolean(rotatingSettings.auto_rotate);
+  const min = $("#proxy-rotate-min");
+  if (min) min.value = rotatingSettings.min_interval_seconds ?? 60;
+  const max = $("#proxy-rotate-max");
+  if (max) max.value = rotatingSettings.max_interval_seconds ?? 1800;
+  const cache = $("#proxy-rotate-cache");
+  if (cache) cache.value = rotatingSettings.failed_ip_cache_size ?? 10;
+}
+
+async function saveSettings(button) {
+  if (button) button.disabled = true;
+  try {
+    const data = await api("/api/proxies/settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        proxy_source: $("#proxy-source")?.value || "both",
+        rotating_proxy: {
+          auto_rotate: Boolean($("#proxy-auto-rotate")?.checked),
+          min_interval_seconds: Number($("#proxy-rotate-min")?.value || 0),
+          max_interval_seconds: Number($("#proxy-rotate-max")?.value || 0),
+          failed_ip_cache_size: Number($("#proxy-rotate-cache")?.value || 10),
+        },
+      }),
+    });
+    if (!hasSession()) return;
+    proxySource = data.proxy_source || "both";
+    rotatingSettings = data.rotating_proxy || {};
+    currentProxies = data.proxies || [];
+    render();
+    await loadConfig();
+    toast(t("代理设置已保存", "proxies.source.saved"));
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -144,6 +190,28 @@ async function testAllProxies(button) {
   if (button) button.disabled = false;
 }
 
+async function rotateProxy(proxy, button) {
+  if (button) button.disabled = true;
+  const original = button?.textContent;
+  if (button) button.textContent = t("轮换中…", "proxies.rotating");
+  try {
+    const data = await api(`/api/proxies/${encodeURIComponent(proxy.id)}/rotate`, {
+      method: "POST",
+    });
+    if (!hasSession()) return;
+    currentProxies = data.proxies || [];
+    render();
+    toast(t("已调用轮换链接，出口 IP 已更换", "proxies.toast.rotated"));
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    if (button) {
+      button.textContent = original;
+      button.disabled = false;
+    }
+  }
+}
+
 async function mutateProxy(id, method, body, button) {
   if (button) button.disabled = true;
   try {
@@ -165,6 +233,7 @@ async function mutateProxy(id, method, body, button) {
 
 function render() {
   updateModeDisplay();
+  updateSettingsDisplay();
   const countEl = $("#proxy-count");
   const statusEl = $("#proxy-status");
   if (countEl) {
@@ -190,6 +259,16 @@ function render() {
         ? `${proxy.address} [${proxy.source}]`
         : proxy.address;
     row.append(el("td", { class: "mono", text: addrText }));
+
+    // Rotate link (exit-IP change endpoint)
+    row.append(
+      el("td", {
+        class: "section-caption mono",
+        text: proxy.rotate_link
+          ? proxy.rotate_link
+          : t("未配置", "proxies.rotate.none"),
+      }),
+    );
 
     // Health
     let healthClass = "status bad";
@@ -250,6 +329,32 @@ function render() {
       });
       actions.append(btnEdit);
 
+      const btnLink = el("button", {
+        class: "btn btn-sm btn-ghost",
+        text: t("配置轮换链接", "proxies.action.rotateLink"),
+        click: async () => {
+          const val = await promptDialog({
+            title: t("配置 IP 轮换链接", "proxies.rotate.linkTitle"),
+            label: t("调用后会更换出口 IP 的链接（留空清除）", "proxies.rotate.linkLabel"),
+            value: proxy.rotate_link || "",
+            placeholder: "https://provider.example.com/changeip?token=...",
+            confirmLabel: t("保存", "common.save"),
+            maxlength: 512,
+          });
+          if (val === null) return;
+          mutateProxy(proxy.id, "PATCH", { rotate_link: val.trim() }, btnLink);
+        },
+      });
+      actions.append(btnLink);
+
+      const btnRotate = el("button", {
+        class: "btn btn-sm btn-ghost",
+        text: t("轮换 IP", "proxies.action.rotate"),
+        disabled: !proxy.rotate_link,
+        click: () => rotateProxy(proxy, btnRotate),
+      });
+      actions.append(btnRotate);
+
       const btnToggle = el("button", {
         class: "btn btn-sm btn-ghost",
         text: proxy.enabled
@@ -288,7 +393,7 @@ function render() {
   }
 
   if (!currentProxies.length) {
-    emptyRow(host, 5, t("暂无配置代理", "proxies.empty"));
+    emptyRow(host, 6, t("暂无配置代理", "proxies.empty"));
   }
 }
 
@@ -300,6 +405,7 @@ export default {
     $("#proxy-refresh")?.addEventListener("click", load);
     $("#proxy-test-all")?.addEventListener("click", (e) => testAllProxies(e.currentTarget));
     $("#proxy-mode")?.addEventListener("change", (e) => setMode(e.target.value));
+    $("#proxy-settings-save")?.addEventListener("click", (e) => saveSettings(e.currentTarget));
 
     $("#proxy-add-form")?.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -310,9 +416,10 @@ export default {
       const btnAdd = $("#proxy-add");
       if (btnAdd) btnAdd.disabled = true;
       try {
+        const rotateLink = ($("#proxy-add-rotate")?.value || "").trim();
         const data = await api("/api/proxies", {
           method: "POST",
-          body: JSON.stringify({ lines }),
+          body: JSON.stringify({ lines, rotate_link: rotateLink }),
         });
         if (!hasSession()) return;
         input.value = "";
@@ -320,6 +427,8 @@ export default {
         render();
         await loadConfig();
         toast(t("代理添加成功", "proxies.toast.added"));
+        const rotateInput = $("#proxy-add-rotate");
+        if (rotateInput) rotateInput.value = "";
       } catch (error) {
         toast(error.message, true);
       } finally {
