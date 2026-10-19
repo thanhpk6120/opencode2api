@@ -67,7 +67,9 @@ func callRotateLink(ctx context.Context, link string) (int, string, error) {
 
 // resetProxyRoute clears health and cooldown state for the transport whose
 // fingerprint matches the configured proxy id, so the freshly rotated exit is
-// eligible on the next request.
+// eligible on the next request. It also clears the renewal flag: this is the
+// path taken by the operator's manual "Rotate IP" button, where an explicit
+// action is taken as proof enough that the exit changed.
 func (g *Gateway) resetProxyRoute(id string) {
 	if g == nil || g.transports == nil {
 		return
@@ -76,12 +78,21 @@ func (g *Gateway) resetProxyRoute(id string) {
 		if config.Fingerprint(proxy.name) != id {
 			continue
 		}
-		proxy.healthy.Store(true)
-		// A manual or scheduled rotation puts the proxy back in service; leaving
-		// the renewal flag set would keep it out even though the exit changed.
 		proxy.refreshing.Store(false)
-		g.restoreProxy(proxy)
-		g.logger.Info("proxy exit rotated", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name))
+		g.resetProxyHealth(proxy)
 		return
 	}
+}
+
+// resetProxyHealth clears health and cooldown state for one transport without
+// touching the renewal flag. The automatic recovery path uses it: a rotation
+// that only got a 2xx from the rotate link is not yet proof that the new exit
+// works, so the proxy must stay out of service until the model probe passes.
+func (g *Gateway) resetProxyHealth(proxy *proxyTransport) {
+	if g == nil || proxy == nil {
+		return
+	}
+	proxy.healthy.Store(true)
+	g.restoreProxy(proxy)
+	g.logger.Info("proxy exit rotated", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name))
 }

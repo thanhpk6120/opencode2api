@@ -373,3 +373,78 @@ func TestProbeInfeasibleResumesProxy(t *testing.T) {
 		t.Fatal("resume did not restore the proxy")
 	}
 }
+
+// Bố cục giống server hiện tại: toàn proxy tĩnh, không #pool, không rotate link.
+// Cursor phải phục vụ lần lượt tất cả proxy tĩnh trong một request.
+func TestStaticOnlyPoolServesEveryProxy(t *testing.T) {
+	names := []string{"direct", "http://127.0.0.1:20370", "http://127.0.0.1:19731", "http://127.0.0.1:22873"}
+	pool, err := newTransportPool(names, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	cfg := config.Config{Proxies: names}
+	pool.RotatingFirst(func(string) bool { return false })
+	for _, item := range pool.items {
+		if item.isRotating() {
+			t.Fatalf("%s bị coi là rotating dù không có #pool/rotate link", item.name)
+		}
+	}
+	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger(), anonymous: newAnonymousPool(true, pool, 0, config.ProxyModeRoundRobin)}
+
+	cursor := g.anonymous.CursorFor("ses_test")
+	got := make([]string, 0, len(names))
+	for range len(names) {
+		node := cursor.Next()
+		if node == nil {
+			break
+		}
+		got = append(got, node.proxy.name)
+	}
+	t.Logf("thứ tự chọn: %v", got)
+	if len(got) != len(names) {
+		t.Fatalf("chỉ dùng %d/%d proxy tĩnh trong một request: %v", len(got), len(names), got)
+	}
+	seen := map[string]bool{}
+	for _, name := range got {
+		if seen[name] {
+			t.Fatalf("proxy tĩnh bị lặp trong cùng request: %v", got)
+		}
+		seen[name] = true
+	}
+	for _, name := range names {
+		if !seen[name] {
+			t.Fatalf("proxy tĩnh %s không được dùng: %v", name, got)
+		}
+	}
+}
+
+// Trong lúc renew, proxy phải ở ngoài vòng phục vụ cho tới khi probe xong:
+// resetProxyHealth không được clear cờ refreshing.
+func TestRenewKeepsProxySuspendedUntilProbe(t *testing.T) {
+	name := "http://127.0.0.1:7891#pool"
+	pool, err := newTransportPool([]string{name}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	proxy := pool.items[0]
+	proxy.rotating.Store(true)
+	proxy.refreshing.Store(true)
+	g := &Gateway{cfg: config.Config{}, transports: pool, logger: testLogger()}
+
+	g.resetProxyHealth(proxy)
+	if !proxy.healthy.Load() {
+		t.Fatal("resetProxyHealth không bật lại healthy")
+	}
+	if !proxy.refreshing.Load() {
+		t.Fatal("renew làm proxy về phục vụ trước khi probe")
+	}
+	if proxy.available() {
+		t.Fatal("proxy chưa probe đã available")
+	}
+
+	// Đường thủ công của admin thì phải đưa về phục vụ ngay.
+	g.resetProxyRoute(config.Fingerprint(name))
+	if proxy.refreshing.Load() || !proxy.available() {
+		t.Fatal("xoay thủ công không đưa proxy về phục vụ")
+	}
+}

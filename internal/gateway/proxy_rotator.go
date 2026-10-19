@@ -176,7 +176,10 @@ func (r *proxyRotator) renew(proxy *proxyTransport, reason string) {
 		// next request) over the old tunnel to the old exit IP, making the whole
 		// rotation invisible. #pool entries already disable keep-alives.
 		proxy.client.CloseIdleConnections()
-		r.gateway.resetProxyRoute(id)
+		// Only the health/cooldown state is cleared here. The renewal flag stays
+		// set until the probe below proves the new exit can serve a model,
+		// otherwise traffic would resume on an unverified exit.
+		r.gateway.resetProxyHealth(proxy)
 
 		rangeKey := r.probeExitRange(proxy)
 		if rangeKey == "" {
