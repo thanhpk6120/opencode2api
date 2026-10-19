@@ -325,7 +325,10 @@ function render() {
               "proxies.edit.label",
             ),
             value: "",
-            placeholder: "http://user:pass@10.0.0.1:8080",
+            placeholder: `http://user:pass@host:port  (${proxy.address})`,
+            // The default of 80 truncates a credentialed URL (plus a #pool
+            // suffix) at the input level, silently saving a cut address.
+            maxlength: 512,
             confirmLabel: t("保存", "common.save"),
           });
           const next = (val || "").trim();
