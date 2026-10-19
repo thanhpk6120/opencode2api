@@ -77,6 +77,9 @@ func (g *Gateway) resetProxyRoute(id string) {
 			continue
 		}
 		proxy.healthy.Store(true)
+		// A manual or scheduled rotation puts the proxy back in service; leaving
+		// the renewal flag set would keep it out even though the exit changed.
+		proxy.refreshing.Store(false)
 		g.restoreProxy(proxy)
 		g.logger.Info("proxy exit rotated", "component", "proxy", "event", "proxy_rotated", "proxy", config.RedactURL(proxy.name))
 		return

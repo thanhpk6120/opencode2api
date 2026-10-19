@@ -169,20 +169,17 @@ func (c *anonymousCursor) Next() *anonymousNode {
 		c.used = make([]bool, n)
 	}
 	now := time.Now().UnixNano()
-	// Rotating proxies are the preferred route: they can renew their exit, and
-	// the static entries exist to carry traffic only while that happens. Every
-	// entry is still visited at most once per cursor, so a failing rotation does
-	// not starve the static fallback.
+
+	// Pass 0 takes rotating proxies, pass 1 takes the static ones. Both scan the
+	// whole ring from the cursor start, so a session hash cannot pin the cursor
+	// onto the fallback while a healthy rotating exit exists.
 	for pass := 0; pass < 2; pass++ {
-		// Each pass scans the whole ring once from the cursor start; the second
-		// pass exists to reach static entries the first pass skipped.
 		for step := 0; step < n; step++ {
 			idx := (c.start + step) % n
 			node := c.pool.nodes[idx]
 			if c.used[idx] || !node.proxy.available() {
 				continue
 			}
-			// Pass 0 takes rotating proxies only; pass 1 takes the rest.
 			if node.proxy.isRotating() != (pass == 0) {
 				continue
 			}
@@ -193,41 +190,42 @@ func (c *anonymousCursor) Next() *anonymousNode {
 			return node
 		}
 	}
+
+	// Rotating pool entries may be reused: each attempt opens a fresh
+	// connection and therefore a new exit IP.
 	if c.pool.hasPool {
-		// Rotating pool entries may be reused: each attempt opens a fresh
-		// connection and therefore a new exit IP.
-		for range n {
-			idx := (c.start + c.offset) % n
-			c.offset++
-			node := c.pool.nodes[idx]
+		for step := 0; step < n; step++ {
+			node := c.pool.nodes[(c.start+step)%n]
 			if node.proxy.pool && node.proxy.available() {
 				return node
 			}
 		}
 	}
-	choice := -1
-	var earliest int64
-	choiceHealthy := false
-	for step := range n {
-		idx := (c.start + step) % n
-		if c.used[idx] {
-			continue
+
+	// Tier 1 revisits entries already used in this cursor, but never one that is
+	// being renewed: reusing a healthy static exit beats retrying a dead one.
+	// Tier 2 only runs when nothing else exists, so a rotating-only pool degrades
+	// to slow requests instead of answering every request with a proxy error.
+	for _, allowRefreshing := range []bool{false, true} {
+		choice, earliest := -1, int64(0)
+		for step := 0; step < n; step++ {
+			idx := (c.start + step) % n
+			node := c.pool.nodes[idx]
+			if node.proxy.refreshing.Load() != allowRefreshing {
+				continue
+			}
+			if !allowRefreshing && !node.proxy.healthy.Load() {
+				continue
+			}
+			until := node.cooldownUntil.Load()
+			if choice < 0 || until < earliest {
+				choice, earliest = idx, until
+			}
 		}
-		node := c.pool.nodes[idx]
-		// Last resort: an entry being renewed must still stay out of service,
-		// otherwise the static fallback never gets the chance to serve.
-		healthy := node.proxy.available()
-		if !healthy {
-			continue
+		if choice >= 0 {
+			c.used[choice] = true
+			return c.pool.nodes[choice]
 		}
-		until := node.cooldownUntil.Load()
-		if choice < 0 || (healthy && !choiceHealthy) || (healthy == choiceHealthy && until < earliest) {
-			choice, earliest, choiceHealthy = idx, until, healthy
-		}
-	}
-	if choice >= 0 {
-		c.used[choice] = true
-		return c.pool.nodes[choice]
 	}
 	return nil
 }
@@ -313,25 +311,44 @@ func (p *transportPool) RotatingFirst(isRotating func(name string) bool) {
 	p.items = ordered
 }
 
+// pickPreferred scans the pool from start, taking rotating proxies first and
+// the static ones only as fallback. It is shared by every selection mode so the
+// key lane prefers rotating exits exactly like the anonymous cursor does.
+func (p *transportPool) pickPreferred(start int) *proxyTransport {
+	if p == nil || len(p.items) == 0 {
+		return nil
+	}
+	n := len(p.items)
+	for pass := 0; pass < 2; pass++ {
+		for offset := 0; offset < n; offset++ {
+			candidate := p.items[((start+offset)%n+n)%n]
+			if !candidate.available() || candidate.isRotating() != (pass == 0) {
+				continue
+			}
+			return candidate
+		}
+	}
+	return nil
+}
+
 // stickyProxy returns the pinned proxy for sticky mode, skipping to the
-// next healthy one when the pinned proxy is down. It never marks anything:
+// next available one when the pinned proxy is down. It never marks anything:
 // health is owned by syncProxyResult/CheckHealth.
 func (p *transportPool) stickyProxy() *proxyTransport {
 	if p == nil || len(p.items) == 0 {
 		return nil
 	}
 	pinned := int(p.sticky.Load() % uint64(len(p.items)))
-	for offset := 0; offset < len(p.items); offset++ {
-		candidate := p.items[(pinned+offset)%len(p.items)]
-		if candidate.available() {
-			return candidate
-		}
+	if candidate := p.pickPreferred(pinned); candidate != nil {
+		return candidate
 	}
-	return p.items[pinned%len(p.items)]
+	// Nothing is available: keep the pinned proxy so the request still reaches
+	// one route instead of failing with no proxy at all.
+	return p.items[pinned]
 }
 
 // advanceSticky moves the pinned proxy forward after a sticky failure so the
-// next request starts on the following healthy proxy.
+// next request starts on the following proxy.
 func (p *transportPool) advanceSticky(failed *proxyTransport) {
 	if p == nil || len(p.items) < 2 {
 		return
@@ -352,13 +369,10 @@ func (p *transportPool) pickRoundRobinHealthy() *proxyTransport {
 		return nil
 	}
 	start := int(p.roundRobin.Add(1) - 1)
-	for offset := range len(p.items) {
-		candidate := p.items[(start+offset)%len(p.items)]
-		if candidate.available() {
-			return candidate
-		}
+	if candidate := p.pickPreferred(start); candidate != nil {
+		return candidate
 	}
-	return p.items[start%len(p.items)]
+	return p.items[((start%len(p.items))+len(p.items))%len(p.items)]
 }
 
 func (p *transportPool) pickRandomHealthy() *proxyTransport {
@@ -366,22 +380,25 @@ func (p *transportPool) pickRandomHealthy() *proxyTransport {
 		return nil
 	}
 	start := rand.IntN(len(p.items))
-	for offset := range len(p.items) {
-		candidate := p.items[(start+offset)%len(p.items)]
-		if candidate.available() {
-			return candidate
-		}
+	if candidate := p.pickPreferred(start); candidate != nil {
+		return candidate
 	}
 	return p.items[start]
 }
 
+// hasHealthy reports whether some route can serve right now. A pool where every
+// rotating proxy is being renewed still counts: those entries remain the only
+// route, and callers use this to choose between "proxy error" and "no channel".
 func (p *transportPool) hasHealthy() bool {
+	if p == nil || len(p.items) == 0 {
+		return false
+	}
 	for _, proxy := range p.items {
 		if proxy.available() {
 			return true
 		}
 	}
-	return false
+	return true
 }
 
 func (p *transportPool) healthCounts() (total, healthy int) {

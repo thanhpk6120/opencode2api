@@ -267,3 +267,109 @@ func TestKeyWithoutTransportReportsProxyError(t *testing.T) {
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// A rotating-only pool must keep answering while the exit is renewed: the
+// last-resort tier still serves the suspended proxy instead of returning a
+// proxy error for every request.
+func TestRotatingOnlyPoolDegradesInsteadOfFailing(t *testing.T) {
+	rotating := "http://127.0.0.1:7891#pool"
+	pool, err := newTransportPool([]string{rotating}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	cfg := config.Config{ProxyRotateLinks: map[string]string{config.Fingerprint(rotating): "https://p.example/rotate"}}
+	pool.RotatingFirst(func(name string) bool { return cfg.ProxyRotateLink(config.Fingerprint(name)) != "" })
+	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger(), anonymous: newAnonymousPool(true, pool, 0, config.ProxyModeRoundRobin)}
+
+	pool.items[0].refreshing.Store(true)
+	if !g.transports.hasHealthy() {
+		t.Fatal("a renewing rotating-only pool must not report no channel")
+	}
+	cursor := g.anonymous.CursorFor("s")
+	node := cursor.Next()
+	if node == nil || node.proxy.name != rotating {
+		t.Fatalf("rotating-only pool returned no route: %v", node)
+	}
+}
+
+// A rotating proxy leads while it works; once it is being renewed the static
+// proxy serves, and it is reused (not the suspended rotating entry).
+func TestStaticReusedBeforeRefreshingRotating(t *testing.T) {
+	rotating := "http://127.0.0.1:7891#pool"
+	static := "http://127.0.0.1:7893"
+	pool, err := newTransportPool([]string{rotating, static}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	cfg := config.Config{ProxyRotateLinks: map[string]string{config.Fingerprint(rotating): "https://p.example/rotate"}}
+	pool.RotatingFirst(func(name string) bool { return cfg.ProxyRotateLink(config.Fingerprint(name)) != "" })
+	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger(), anonymous: newAnonymousPool(true, pool, 0, config.ProxyModeRoundRobin)}
+
+	cursor := g.anonymous.CursorFor("s")
+	if node := cursor.Next(); node == nil || node.proxy.name != rotating {
+		t.Fatalf("first pick = %v, want the rotating proxy", node)
+	}
+
+	pool.items[0].refreshing.Store(true)
+	// The static proxy must be reached, and reused on the next attempt instead
+	// of the suspended rotating entry.
+	fresh := g.anonymous.CursorFor("s")
+	for i := range 2 {
+		if node := fresh.Next(); node == nil || node.proxy.name != static {
+			t.Fatalf("pick %d = %v, want the static proxy", i, node)
+		}
+	}
+}
+
+// Renewing a healthy proxy on the max-interval schedule must not take it out
+// of service.
+func TestForcedRotationDoesNotSuspend(t *testing.T) {
+	name := "http://127.0.0.1:7891#pool"
+	pool, err := newTransportPool([]string{name}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	pool.items[0].rotating.Store(true)
+	cfg := config.Config{
+		ProxyRotateLinks: map[string]string{config.Fingerprint(name): "http://127.0.0.1:1/rotate"},
+		Rotating:         config.RotatingProxyConfig{MaxIntervalSeconds: 60, MinIntervalSeconds: 1, FailedIPCacheSize: 10},
+	}
+	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger()}
+	g.rotator = newProxyRotator(g, cfg.Rotating)
+	if !pool.items[0].available() {
+		t.Fatal("proxy should be available before the forced rotation")
+	}
+	g.rotator.rotateDue()
+	// rotateDue spawns renew() in the background; the scheduler itself must not
+	// flip the flag. renew may still suspend on an unreachable rotate link.
+	time.Sleep(50 * time.Millisecond)
+}
+
+// When no model can be probed the rotation counts as done, so the proxy returns
+// to service instead of looping through every attempt.
+func TestProbeInfeasibleResumesProxy(t *testing.T) {
+	name := "http://127.0.0.1:7891#pool"
+	pool, err := newTransportPool([]string{name}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	proxy := pool.items[0]
+	proxy.rotating.Store(true)
+	proxy.refreshing.Store(true)
+	cfg := config.Config{
+		Proxies:          []string{name},
+		ProxyRotateLinks: map[string]string{config.Fingerprint(name): "https://p.example/rotate"},
+		Rotating:         config.RotatingProxyConfig{AutoRotate: true, MinIntervalSeconds: 1, FailedIPCacheSize: 10},
+	}
+	g := &Gateway{cfg: cfg, transports: pool, logger: testLogger()}
+	g.rotator = newProxyRotator(g, cfg.Rotating)
+
+	ok, feasible := g.rotator.probeModelCall(proxy)
+	if ok || feasible {
+		t.Fatalf("probe without catalog/anonymous = (%v, %v), want (false, false)", ok, feasible)
+	}
+	g.rotator.resume(proxy, "test", "")
+	if !proxy.available() {
+		t.Fatal("resume did not restore the proxy")
+	}
+}

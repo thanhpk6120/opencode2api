@@ -129,8 +129,8 @@ func (r *proxyRotator) rotateDue() {
 		if !r.due(proxy, time.Duration(r.cfg.MaxIntervalSeconds)*time.Second) {
 			continue
 		}
-		// A forced rotation also restores a proxy suspended without auto_rotate.
-		proxy.refreshing.Store(true)
+		// A forced rotation of a healthy proxy must not take it out of service:
+		// only an entry suspended by a failed call is unavailable to begin with.
 		go r.renew(proxy, "max_interval")
 	}
 }
@@ -152,7 +152,7 @@ func (r *proxyRotator) renew(proxy *proxyTransport, reason string) {
 		proxy.refreshing.Store(false)
 		return
 	}
-	if !r.claim(proxy) {
+	if !r.waitForSlot(proxy) {
 		return
 	}
 	defer r.release(proxy)
@@ -172,6 +172,10 @@ func (r *proxyRotator) renew(proxy *proxyTransport, reason string) {
 			return
 		}
 		r.stamp(proxy)
+		// A transport that keeps connections alive would send the probe (and the
+		// next request) over the old tunnel to the old exit IP, making the whole
+		// rotation invisible. #pool entries already disable keep-alives.
+		proxy.client.CloseIdleConnections()
 		r.gateway.resetProxyRoute(id)
 
 		rangeKey := r.probeExitRange(proxy)
@@ -193,7 +197,16 @@ func (r *proxyRotator) renew(proxy *proxyTransport, reason string) {
 			// Drawing a known-bad exit again is not worth an AI call.
 			continue
 		}
-		if r.probeModelCall(proxy) {
+		ok, feasible := r.probeModelCall(proxy)
+		if !feasible {
+			// No model can be probed (no anonymous lane, empty catalog). The
+			// rotation itself is then the only evidence available; looping would
+			// just burn quota and leave the proxy out of service.
+			r.logger.Info("proxy exit rotated but cannot be probed", "component", "proxy", "event", "rotate_probe_skipped", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey)
+			r.resume(proxy, reason, rangeKey)
+			return
+		}
+		if ok {
 			r.resume(proxy, reason, rangeKey)
 			r.logger.Info("rotating proxy back in service", "component", "proxy", "event", "rotate_probe_succeeded", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey, "attempt", attempt+1)
 			return
@@ -278,6 +291,28 @@ func (r *proxyRotator) claim(proxy *proxyTransport) bool {
 	return true
 }
 
+// waitForSlot blocks until a rotation is allowed, or reports false when the
+// proxy is already being renewed by another goroutine. Blocking here instead of
+// dropping the request is what keeps a suspended proxy from waiting for the
+// next forced rotation before it is retried.
+func (r *proxyRotator) waitForSlot(proxy *proxyTransport) bool {
+	if proxy == nil {
+		return false
+	}
+	id := config.Fingerprint(proxy.name)
+	r.mu.Lock()
+	busy := r.inflight[id]
+	wait := time.Duration(r.cfg.MinIntervalSeconds)*time.Second - time.Since(r.last[id])
+	r.mu.Unlock()
+	if busy {
+		return false
+	}
+	if wait > 0 {
+		time.Sleep(wait)
+	}
+	return r.claim(proxy)
+}
+
 func (r *proxyRotator) release(proxy *proxyTransport) {
 	if proxy == nil {
 		return
@@ -307,23 +342,26 @@ func (r *proxyRotator) resume(proxy *proxyTransport, reason, rangeKey string) {
 	r.logger.Info("rotating proxy back in service", "component", "proxy", "event", "proxy_resumed", "proxy", config.RedactURL(proxy.name), "reason", reason, "exit_range", rangeKey)
 }
 
-// probeModelCall performs a real, minimal AI-model call through the proxy. A
-// renewed exit is only accepted when the upstream answers it, which is what the
-// operator asked for: keep rotating until an exit can actually serve a model.
-func (r *proxyRotator) probeModelCall(proxy *proxyTransport) bool {
+// probeModelCall performs a real, minimal AI-model call through the proxy. The
+// second result reports whether probing is possible at all: an empty catalog or
+// a disabled anonymous lane is "cannot probe", which must not be confused with
+// "the new exit failed".
+func (r *proxyRotator) probeModelCall(proxy *proxyTransport) (ok, feasible bool) {
 	g := r.gateway
 	if g == nil || proxy == nil || proxy.client == nil || g.catalog == nil {
-		return false
+		return false, false
+	}
+	// The probe rides the keyless lane, so it only exists when that lane does.
+	if !g.cfg.Anonymous {
+		return false, false
 	}
 	model := g.rotationProbeModel()
 	if model == "" {
-		// No model to probe with: fall back to accepting a reachable exit so a
-		// misconfigured catalog cannot strand the proxy forever.
-		return r.probeExitRange(proxy) != ""
+		return false, false
 	}
 	route, err := g.catalog.Route(model, g.zenNodes.Len() > 0, g.goNodes.Len() > 0, g.cfg.Anonymous)
 	if err != nil {
-		return false
+		return false, false
 	}
 	protocol := route.ProtocolFor(config.TierZen)
 	if protocol == "" {
@@ -331,19 +369,19 @@ func (r *proxyRotator) probeModelCall(proxy *proxyTransport) bool {
 	}
 	body, err := probePayload(model, protocol, "", isLegacyZenUpstream(models.LegacyZenBase))
 	if err != nil {
-		return false
+		return false, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
 	ids := identity.RequestIDs{Request: identity.RandomID("req", 16), Session: identity.CanonicalSessionID("rotation:" + config.Fingerprint(proxy.name)), Project: "opencode2api:default-project"}
 	req, err := newUpstreamRequest(ctx, models.LegacyZenBase, protocol, body, ids, anonymousZenKey)
 	if err != nil {
-		return false
+		return false, false
 	}
 	req.Close = true
 	resp, err := proxy.client.Do(req)
 	if err != nil {
-		return false
+		return false, true
 	}
 	defer func() {
 		if resp.Body != nil {
@@ -351,14 +389,16 @@ func (r *proxyRotator) probeModelCall(proxy *proxyTransport) bool {
 		}
 	}()
 	if resp.StatusCode/100 != 2 {
-		return false
+		// A model-level rejection says nothing about the exit: the model may be
+		// retired or unsupported, which no rotation can fix.
+		return false, !isModelUnavailable(resp.StatusCode, "")
 	}
 	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") && protocol != wire.SystemOne {
 		if _, err := wire.CollapseStream(resp.Body, protocol, model); err != nil {
-			return false
+			return false, true
 		}
 	}
-	return true
+	return true, true
 }
 
 // rotationProbeModel picks a free model already known to work with the public
