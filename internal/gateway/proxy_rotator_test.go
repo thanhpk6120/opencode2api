@@ -283,7 +283,7 @@ func TestRotatingOnlyPoolDegradesInsteadOfFailing(t *testing.T) {
 
 	pool.items[0].refreshing.Store(true)
 	if !g.transports.hasHealthy() {
-		t.Fatal("a renewing rotating-only pool must not report no channel")
+		t.Fatal("pool rotating-only đang renew phải báo còn đường thoát")
 	}
 	cursor := g.anonymous.CursorFor("s")
 	node := cursor.Next()
@@ -446,5 +446,29 @@ func TestRenewKeepsProxySuspendedUntilProbe(t *testing.T) {
 	g.resetProxyRoute(config.Fingerprint(name))
 	if proxy.refreshing.Load() || !proxy.available() {
 		t.Fatal("xoay thủ công không đưa proxy về phục vụ")
+	}
+}
+
+// Mọi proxy tĩnh đều unhealthy (không renew) ⇒ không còn đường thoát, để client
+// nhận 503 proxy_error thay vì 502 upstream_error.
+func TestHasHealthyFalseWhenEveryProxyUnhealthy(t *testing.T) {
+	pool, err := newTransportPool([]string{"direct", "http://127.0.0.1:7890"}, config.PerformanceConfig{}, 0, config.ProxyModeRoundRobin)
+	if err != nil {
+		t.Fatalf("build pool: %v", err)
+	}
+	for _, item := range pool.items {
+		item.healthy.Store(false)
+	}
+	if pool.hasHealthy() {
+		t.Fatal("hasHealthy báo còn đường thoát dù mọi proxy đều unhealthy")
+	}
+	// Đang renew thì vẫn tính là còn đường thoát.
+	pool.items[0].refreshing.Store(true)
+	if !pool.hasHealthy() {
+		t.Fatal("hasHealthy phải tính proxy đang renew")
+	}
+	// Pool rỗng thì luôn false.
+	if (&transportPool{}).hasHealthy() {
+		t.Fatal("pool rỗng báo còn đường thoát")
 	}
 }

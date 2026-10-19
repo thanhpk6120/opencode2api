@@ -386,19 +386,22 @@ func (p *transportPool) pickRandomHealthy() *proxyTransport {
 	return p.items[start]
 }
 
-// hasHealthy reports whether some route can serve right now. A pool where every
-// rotating proxy is being renewed still counts: those entries remain the only
-// route, and callers use this to choose between "proxy error" and "no channel".
+// hasHealthy reports whether the pool still has a usable route. It is used to
+// choose between "a proxy error" and "no channel at all", so it stays true only
+// when some proxy can serve now, or when one is being renewed: a renewal is a
+// temporary suspension and the entry remains the only route for a
+// rotating-only pool. A pool whose every proxy is unhealthy reports false, so
+// the client still receives the proxy error instead of a generic bad gateway.
 func (p *transportPool) hasHealthy() bool {
 	if p == nil || len(p.items) == 0 {
 		return false
 	}
 	for _, proxy := range p.items {
-		if proxy.available() {
+		if proxy.available() || proxy.refreshing.Load() {
 			return true
 		}
 	}
-	return true
+	return false
 }
 
 func (p *transportPool) healthCounts() (total, healthy int) {
