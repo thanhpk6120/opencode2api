@@ -58,16 +58,23 @@ function renderChecklist() {
   });
 }
 
-// newestProxy returns the proxy with the most recent attempt. The dashboard
-// highlights it: with round-robin/random selection this is the egress that
-// client traffic is actually leaving through right now.
+// A proxy counts as "in use" only while its newest attempt is recent. Without
+// this window the badge would stay on whichever proxy served the last request
+// forever, claiming an egress that is no longer carrying anything. 15 s covers
+// the 3 s monitor poll plus a slow request without going stale.
+const IN_USE_WINDOW_MS = 15000;
+
+// newestProxy returns the proxy that carried the most recent attempt, or null
+// when that attempt is older than the window. With round-robin/random selection
+// the newest one is the egress client traffic is actually leaving through.
 function newestProxy(list) {
   let best = null;
   list.forEach((proxy) => {
     if (!proxy.last_used) return;
     if (!best || new Date(proxy.last_used) > new Date(best.last_used)) best = proxy;
   });
-  return best;
+  if (!best) return null;
+  return Date.now() - new Date(best.last_used).getTime() <= IN_USE_WINDOW_MS ? best : null;
 }
 
 function renderResources(resources) {
@@ -79,7 +86,7 @@ function renderResources(resources) {
   if (currentLabel) {
     currentLabel.textContent = current
       ? t(`当前出口：${current.address}`, "overview.proxy.current", current.address)
-      : t("尚未有流量经过任何代理", "overview.proxy.current.empty");
+      : t("当前没有正在进行的请求", "overview.proxy.current.empty");
   }
   list.forEach((proxy) => {
     const inUse = current && proxy.id === current.id;
