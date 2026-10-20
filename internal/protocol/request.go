@@ -25,7 +25,48 @@ func PrepareRequest(from, to Protocol, input map[string]any, upstreamURL string)
 		jsonutil.Put(output, "max_output_tokens", floorResponsesMaxTokens(output["max_output_tokens"]))
 	}
 	normalizeToolReasoningHistory(to, jsonutil.StringAt(output, "model"), upstreamURL, output)
+	translateThinkingForChat(output, from, to)
 	return output, nil
+}
+
+// translateThinkingForChat rewrites an Anthropic-shaped "thinking" block into
+// the Chat-native "reasoning_effort" when the destination speaks Chat.
+//
+// A same-protocol body is a straight clone, so a client that sends
+// {"thinking": {...}} to an OpenAI-style endpoint carries the field all the way
+// to the upstream. Some gates deserialize strictly and reject the whole request
+// with `unknown field "thinking"`, which the caller cannot recover from.
+// Converting rather than deleting keeps the client's reasoning intent.
+//
+// The field stays untouched on Anthropic and Responses destinations, and no
+// effort is invented for a client that only asked to disable reasoning.
+func translateThinkingForChat(output map[string]any, from, to Protocol) {
+	if to != Chat {
+		return
+	}
+	raw, ok := output["thinking"]
+	if !ok {
+		return
+	}
+	delete(output, "thinking")
+	object, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	if _, stated := output["reasoning_effort"]; stated {
+		return
+	}
+	if effort, stated := explicitEffort(object); stated {
+		if effort != nil {
+			output["reasoning_effort"] = effort
+		}
+		return
+	}
+	// A one-sided {"type":"enabled","budget_tokens":N} names a budget instead
+	// of a level; map it back onto the rung it came from.
+	if budget := jsonutil.IntAt(object, "budget_tokens"); budget > 0 && jsonutil.StringAt(object, "type") == "enabled" {
+		output["reasoning_effort"] = effortForThinkingBudget(budget)
+	}
 }
 
 // ForcedEffort applies an operator-configured thinking level to a prepared
