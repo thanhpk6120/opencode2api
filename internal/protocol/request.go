@@ -731,6 +731,40 @@ func encodeChatRequest(request bridgeRequest) (map[string]any, error) {
 		messages = append(messages, encoded)
 	}
 
+	// flushPendingTools closes every tool call that is still waiting for a
+	// result by emitting an empty tool message. Clients prune their history and
+	// drop results, and every upstream gate rejects a tool call without one, so
+	// the alternative would be failing the whole request over a gap the model
+	// can simply work around.
+	flushPendingTools := func() {
+		if len(pendingOrder) == 0 {
+			return
+		}
+		for _, id := range pendingOrder {
+			text := ""
+			var attachments []map[string]any
+			if result, ok := pendingResults[id]; ok {
+				var images []bridgeBlock
+				text, images = chatToolImages(result)
+				if len(images) > 0 {
+					attachments = append(attachments, map[string]any{"role": "user", "content": encodeChatBlocks(images)})
+				}
+			}
+			messages = append(messages, map[string]any{
+				"role":         "tool",
+				"tool_call_id": id,
+				"content":      text,
+			})
+			for _, attachment := range attachments {
+				messages = append(messages, attachment)
+			}
+		}
+		flushDeferred()
+		pendingOrder = nil
+		clear(pendingResults)
+		pending = make(map[string]bool)
+	}
+
 	for i, message := range request.Messages {
 		var content, reasoning, calls, results []bridgeBlock
 		for _, block := range message.Blocks {
@@ -746,9 +780,9 @@ func encodeChatRequest(request bridgeRequest) (map[string]any, error) {
 			}
 		}
 		if message.Role == "assistant" {
-			if len(pending) > 0 {
-				return nil, fmt.Errorf("messages[%d]: assistant message appears before tool results for %s", i, strings.Join(missingToolIDs(pendingOrder, pending), ", "))
-			}
+			// A new assistant turn before every tool result arrived means the
+			// client rewrote history. Close the open calls rather than reject.
+			flushPendingTools()
 			if len(results) > 0 {
 				return nil, fmt.Errorf("messages[%d]: assistant message contains tool results", i)
 			}
@@ -793,11 +827,11 @@ func encodeChatRequest(request bridgeRequest) (map[string]any, error) {
 			return nil, fmt.Errorf("messages[%d]: user message contains tool calls", i)
 		}
 		for _, result := range results {
-			if _, duplicate := pendingResults[result.CallID]; duplicate {
-				return nil, fmt.Errorf("messages[%d]: duplicate tool result %q", i, result.CallID)
-			}
-			if !pending[result.CallID] {
-				return nil, fmt.Errorf("messages[%d]: tool result %q has no pending tool call", i, result.CallID)
+			// A result with no matching open call is dropped. The upstream gate
+			// has nothing to attach it to, and clients produce these by pruning
+			// the assistant turn that owned the call.
+			if _, duplicate := pendingResults[result.CallID]; duplicate || !pending[result.CallID] {
+				continue
 			}
 			pendingResults[result.CallID] = result
 			delete(pending, result.CallID)
@@ -831,9 +865,10 @@ func encodeChatRequest(request bridgeRequest) (map[string]any, error) {
 			clear(pendingResults)
 		}
 	}
-	if len(pending) > 0 {
-		return nil, fmt.Errorf("tool calls are missing results for %s", strings.Join(missingToolIDs(pendingOrder, pending), ", "))
-	}
+	// The conversation may end on an assistant tool call whose result has not
+	// been sent yet (a client that streams the turn while the tool is still
+	// running). Close it so the payload stays valid.
+	flushPendingTools()
 	flushDeferred()
 	carryBudgetOnly()
 	output["messages"] = messages
