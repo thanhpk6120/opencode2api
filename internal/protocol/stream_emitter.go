@@ -497,6 +497,23 @@ func (emitter *bridgeStreamEmitter) Finish() error {
 	}
 	switch emitter.target {
 	case Chat:
+		for _, key := range emitter.order {
+			tool := emitter.tools[key]
+			if err := emitter.startTool(tool); err != nil {
+				return err
+			}
+			if err := emitter.emitPendingToolArguments(tool); err != nil {
+				return err
+			}
+			if tool.Started && tool.EmittedArguments == 0 {
+				// startTool announced an empty arguments string. Promote it to
+				// "{}" so the finished tool call carries valid JSON, matching
+				// finishResponsesItems and encodeBridgeResponse.
+				if err := emitter.emitToolDelta(tool, "{}"); err != nil {
+					return err
+				}
+			}
+		}
 		if err := emitter.chatChunk(map[string]any{}, chatStop(emitter.stop)); err != nil {
 			return err
 		}

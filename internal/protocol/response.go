@@ -335,7 +335,7 @@ func anthropicUsage(usage Usage) map[string]any {
 
 func chatStop(stop string) string {
 	switch stop {
-	case "tool_use", "tool_calls":
+	case "tool_use", "tool_calls", "tool-calls", "tool_call":
 		return "tool_calls"
 	case "max_tokens", "length":
 		return "length"
@@ -348,7 +348,7 @@ func chatStop(stop string) string {
 
 func anthropicStop(stop string) string {
 	switch stop {
-	case "tool_use", "tool_calls":
+	case "tool_use", "tool_calls", "tool-calls", "tool_call":
 		return "tool_use"
 	case "max_tokens", "length":
 		return "max_tokens"
@@ -361,7 +361,7 @@ func anthropicStop(stop string) string {
 
 func canonicalChatStop(stop string) string {
 	switch stop {
-	case "tool_calls", "function_call":
+	case "tool_calls", "function_call", "tool-calls", "tool_call":
 		return "tool_calls"
 	case "length":
 		return "length"
@@ -376,7 +376,7 @@ func canonicalChatStop(stop string) string {
 
 func canonicalAnthropicStop(stop string) string {
 	switch stop {
-	case "tool_use":
+	case "tool_use", "tool-calls", "tool_call":
 		return "tool_calls"
 	case "max_tokens":
 		return "length"
@@ -393,7 +393,7 @@ func canonicalAnthropicStop(stop string) string {
 // calls downstream.
 func isToolStop(stop string) bool {
 	switch stop {
-	case "tool_calls", "tool_use", "function_call":
+	case "tool_calls", "tool_use", "function_call", "tool-calls", "tool_call":
 		return true
 	default:
 		return false

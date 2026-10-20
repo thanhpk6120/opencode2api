@@ -67,7 +67,7 @@ func (parser *bridgeStreamParser) parseChatEvent(eventName string, value map[str
 	for _, raw := range jsonutil.SliceAt(value, "choices") {
 		choice, _ := raw.(map[string]any)
 		delta := jsonutil.MapAt(choice, "delta")
-		if reasoning := jsonutil.FirstString(jsonutil.StringAt(delta, "reasoning_content"), jsonutil.StringAt(delta, "reasoning")); reasoning != "" {
+		if reasoning := firstNonEmpty(jsonutil.StringAt(delta, "reasoning_content"), jsonutil.StringAt(delta, "reasoning")); reasoning != "" {
 			events = append(events, bridgeStreamEvent{Kind: "reasoning", Text: reasoning})
 		}
 		if text := jsonutil.StringAt(delta, "content"); text != "" {
@@ -203,7 +203,7 @@ func (parser *bridgeStreamParser) parseResponses(eventName string, value map[str
 		return []bridgeStreamEvent{{Kind: "start", ResponseID: jsonutil.StringAt(response, "id"), Model: jsonutil.StringAt(response, "model")}}
 	case "response.output_text.delta":
 		return []bridgeStreamEvent{{Kind: "text", Text: jsonutil.StringAt(value, "delta")}}
-	case "response.reasoning_summary_text.delta":
+	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		key := responseToolKey(value, nil)
 		parser.responseReasoning[key] = true
 		return []bridgeStreamEvent{{Kind: "reasoning", Text: jsonutil.StringAt(value, "delta")}}
